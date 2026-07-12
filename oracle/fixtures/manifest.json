@@ -1,0 +1,23 @@
+{
+  "artifact_sha256": {
+    "corpus.json": "6721211db0aa42c3f63e4364f6f84c948a1f9157af6e02bb35325f09fab5e96e",
+    "gain0_donor.json": "e65cb5463f6eca02e9a0aaf9770cb8bad41e9199f270e54e9bf02c3b4639566c",
+    "gain1_analytic.json": "303f79848b37bd6995bd63253d5490383db231c50df56101539d69d722d42553",
+    "quadrature_gl256.json": "d6eb1b34ce9a4c3eb1f724c20fe630d99d27b1e6d3fdbdace609062014de454d",
+    "quadrature_gl32_negative.json": "5d48fd17aecb55235c880048867f55f1412953d9f5f48d14f7ab1a17f9c893ca"
+  },
+  "body_count": 192,
+  "config_sha256": "fa580ac5ce46dc1472dbad0a01f5fae8a7bb8dc311e8d6d8ada7bafc5dff8c6f",
+  "corpus_sha256": "6721211db0aa42c3f63e4364f6f84c948a1f9157af6e02bb35325f09fab5e96e",
+  "donor_path": "/mnt/c/Users/cddal/game prototype/Assets/ProceduralWorld/Scripts/Life/SwimEval.cs",
+  "donor_sha256": "b42b199631fb251436b4f516478f37c3bea2cbf52130e3ba86d79224d28e1e67",
+  "generator_sha256": {
+    "corpus": "f292609d339aaa34b25ea4cf86125a5697ca56471ac3629c16d942b7ec37f7fc",
+    "gain0": "dd98a2e787eb5ba3884b73d3dfbfeb6204d16320a6b7b3799218a138dda2d0bf",
+    "gain1": "5b3ee070478721a36fb9fa0baae70cc8beecdd027b8d4224a00a5c2af675d505"
+  },
+  "kg_per_sim_mass": 250.0,
+  "row_order_sha256": "7a8818557a1907d6eba58ae08119d26e872935e9b780c4326be58e9ef21e69f7",
+  "schema": "sirrobin.locomotion.fixtures.v1",
+  "sim_length_m": 1.0
+}

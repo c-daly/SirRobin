@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sirrobin"
+version = "0.1.0"
+description = "Faithful batched ocean-life simulation core"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "numpy>=2.1,<3",
+  "scipy>=1.14,<2",
+  "torch>=2.6,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "hypothesis>=6,<7",
+  "import-linter>=2,<3",
+  "pytest>=8,<9",
+  "ruff>=0.8,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sirrobin"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+  "oracle: offline oracle and frozen-fixture checks",
+  "gpu: requires CUDA",
+  "slow: long-horizon or benchmark check",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+

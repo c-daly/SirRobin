@@ -1,0 +1,835 @@
+=== codex S0-kernel focused review started ===
+Reading additional input from stdin...
+OpenAI Codex v0.144.1
+--------
+workdir: /mnt/c/Users/cddal/SirRobin
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: high
+reasoning summaries: none
+session id: 019f5661-e629-7c03-afc0-4e898bc929d3
+--------
+user
+You are an adversarial technical reviewer. This is a FOCUSED review of a STANDALONE S0 kernel spec — the go/no-go "SpikeSwim" locomotion kernel only. Do NOT re-review S1/S3 ecology/energy-economy material; that is explicitly deferred (see the spec's section 9) and out of scope. Your job is to decide whether the S0 KERNEL SPEC is internally coherent and approvable to begin BUILDING SpikeSwim.
+
+READ (all under the -C working directory):
+- docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md   <-- THE SPEC UNDER REVIEW (standalone S0).
+- docs/superpowers/plans/2026-07-12-sirrobin-plan-rev3-reconciliation.md  (Rev-3: it supplies the layout section 2-3 and the stable-eigenvalue form section 7.2 that the S0 spec depends on; reference only)
+- docs/superpowers/reviews/2026-07-12-codex-round4-of-rev4.md  (YOUR round-4 findings; the S0 spec claims to close the 5 S0 blockers)
+
+BACKGROUND: In round 4 you named exactly five S0/SpikeSwim blockers: (1) unify gate (b) = R_step, with the force-law identities as separate algebraic (a) subtests; (2) executable solver — ONE predicate `κ>KAPPA_MAX`, safe denominators for the eagerly-evaluated branches, and 2-D x/z momentum separated from the vertical J_c; (3) commit literal gain1 fixture inputs; (4) correct the gain1 quadrature Jacobian (the 1/t² from λ=(1−t)/t); (5) preserve the non-OOM authorization requirement. You also flagged `max(p_in,ε)` should be `max(|p_in|,ε)`. This standalone spec is the attempt to close those.
+
+YOUR TASK — be adversarial and concrete (file:line):
+1. For EACH of the five round-4 S0 blockers above (plus the max(|p_in|,ε) fix), state RESOLVED / PARTIAL / STILL-BROKEN with a one-line reason citing S0-spec file:line.
+2. Scrutinize the SOLVER (section 4) HARDEST — it is the load-bearing, historically bug-prone part:
+   (a) Are BOTH eagerly-evaluated branch solves (`Δv_exact` via `det_safe`, `Δv_reg` via SPD `det_reg`) actually finite on EVERY body, including empty/zero-mass (M=0) and near-singular, BEFORE the `torch.where` select? Find any residual NaN/inf path.
+   (b) Is the degeneracy predicate now single and consistent (`κ>KAPPA_MAX`), with `κ` computed finite even for invalid bodies (does `det_safe` keep `lam_min`/`kappa` finite when M=0)?
+   (c) Is the 2-D x/z momentum equation `MΔv=P+J_reg` now correctly separated from the vertical workless `J_c`, with no dimensional mixing?
+   (d) Is the regularization sign `J_reg=−reg·Δv` correct and does the 2-D momentum close with it?
+3. Check the ENERGY treatment (section 5): gate (a) = force-law identities, gate (b) = R_step — are these now two distinct, non-conflicting meanings (no "gate (b) has two meanings")? Is it consistent that S0 has NO int64 energy ledger and KE is f32-only? Does anything in the S0 spec still put a float into an int64 equality?
+4. Check the gain1 oracle (section 6): are the literal H1 inputs actually committed as numbers; is the 1/t² Jacobian now present and correct; is the endpoint (t→0) integrability handled; is the independence (donor-free, torch-free) real?
+5. Internal-consistency audit of the S0 spec ALONE: list any surviving contradiction WITHIN this standalone document (ignore S1/S3 — section 9 is deferred by design).
+6. Verify the DEFERRAL BOUNDARY (section 9): is anything listed as "deferred to S1/S3" actually something that DOES gate the standalone S0 locomotion kernel? If the boundary is drawn correctly, say so; if something in section 9 must move into S0, name it.
+7. Any NEW problems introduced by this standalone spec.
+8. OVERALL VERDICT: is the S0 kernel spec APPROVABLE to begin building SpikeSwim? If not, list the minimal remaining S0 changes (S0 only — do not require S1/S3 work).
+
+Be concise, concrete, file:line. Do not rubber-stamp the solver.
+codex
+I’ll audit the standalone spec against the round-4 record and Rev-3 dependencies, with the solver checked algebraically and for eager-evaluation edge cases. I’m also doing a quick memory pass because this review depends on prior project conventions and evidence standards.
+exec
+/usr/bin/zsh -lc 'rg -n "SirRobin|SpikeSwim|round-4|S0 kernel|energy economy" /home/fearsidhe/.codex/memories/MEMORY.md' in /mnt/c/Users/cddal/SirRobin
+ succeeded in 0ms:
+47:- creature energy economy, adversarial review, ACTUAL CODE, Allocation.cs, OceanColony.cs, ReproDemand, energyCap, reproBar, Motivation.cs, Kleiber, all-mass invariant, fixed-energy behavior
+
+exec
+/usr/bin/zsh -lc 'wc -l docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md docs/superpowers/plans/2026-07-12-sirrobin-plan-rev3-reconciliation.md docs/superpowers/reviews/2026-07-12-codex-round4-of-rev4.md && nl -ba docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md' in /mnt/c/Users/cddal/SirRobin
+ succeeded in 0ms:
+  259 docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md
+  630 docs/superpowers/plans/2026-07-12-sirrobin-plan-rev3-reconciliation.md
+   87 docs/superpowers/reviews/2026-07-12-codex-round4-of-rev4.md
+  976 total
+     1	# SirRobin — S0 / SpikeSwim Kernel Spec (standalone, build-ready)
+     2	
+     3	**Status:** standalone S0 spec · **Date:** 2026-07-12 · **Supersedes for S0:** the S0-relevant parts of
+     4	Rev-1..Rev-4, with the Codex round-4 S0 fixes applied. **Scope:** ONLY the SpikeSwim go/no-go kernel. All
+     5	S1/S3 ecology/energy-economy material is **explicitly deferred** (§9) and does **not** gate S0.
+     6	
+     7	S0 is a **standalone batched-torch port of the donor's one-shot, frozen-heading `SwimEval.Sim.Step`**
+     8	(`SwimEval.cs:740`) over `B = W·N_cap` ragged bodies. **No ecology, no genome mutation, no steering, no
+     9	metabolic energy ledger.** Frozen-heading path only: `_fThrust`/`_nThrust` constant unit vectors,
+    10	`_vCom.y ≡ 0`, no yaw integration. It exists to answer one question: *does faithful per-body swim physics,
+    11	vectorized on GPU, hit the conservation, oracle, and throughput gates?*
+    12	
+    13	---
+    14	
+    15	## 1. The four S0 gates (the whole acceptance set)
+    16	
+    17	| Gate | Name | Assertion |
+    18	|---|---|---|
+    19	| **(a)** | force-law algebraic identities | per step/body, the two donor closures hold to `rel < 1e-6` (§4) |
+    20	| **(b)** | discrete KE balance `R_step` | per step/body `|R_step|/max(KE_n,ε) < 1e-6` (f64) / `< 1e-3` (f32); the 1e5-step drift curve is **bounded-oscillating** (§5) |
+    21	| **(c)** | independent gain1 oracle | kernel reproduces each committed fixture value to `rel < 1e-4` (f32) (§6) |
+    22	| **(d)** | throughput / affordability | measured on ≥1 **non-OOM** authorization-sized cell (all-OOM ⇒ FAIL) (§7) |
+    23	
+    24	Plus the standing **conservation gate** on the scaffold's *fake* reservoir ledger — exact int64, mass
+    25	currency only (§3). No energy metabolic ledger is exercised at S0.
+    26	
+    27	---
+    28	
+    29	## 2. Body layout & indexing (from Rev-3 §2–§3, unchanged — RESOLVED in round 3)
+    30	
+    31	Retained verbatim from Rev-3 (Codex round-3 marked these RESOLVED): fixed `[B, S_slot]` padded storage,
+    32	`S_slot = 17` = slot-0 **sentinel** + 16 real segments in `[1, S_max]`, root `parent = 0`; empty/zero-mass
+    33	bodies handled by `det_safe` + `body_valid` masking so output is finite zero. The lifecycle eager gather
+    34	uses `free_rank.clamp_min(0)` before masking. This spec **depends on** that layout; it does not change it.
+    35	
+    36	`body_valid := alive & (masked_segment_sum(seg_mass, seg_mask) > 0)`  → `[B]` bool.
+    37	
+    38	---
+    39	
+    40	## 3. Conservation gate — exact int64 transfer (S0 subset of Rev-3 §1)
+    41	
+    42	S0 exercises **only** the int64 transfer machinery on a **fake mass reservoir** (scaffold gate); the
+    43	metabolic *energy* ledger is S1/S3 (§9). Retained from Rev-3 §1, with the round-4 source-cap added:
+    44	
+    45	```python
+    46	def transfer_quanta(src_q, dst_q, n, mask):          # all int64; n >= 0 quanta
+    47	    req   = torch.where(mask, n, 0)
+    48	    n_eff = torch.minimum(req, src_q)                # SOURCE CAP: never overdraw → no negative reservoir
+    49	    return src_q - n_eff, dst_q + n_eff, (req - n_eff)   # 3rd return = shortfall for the caller's failure path
+    50	```
+    51	
+    52	`close_books()` is an exact integer `==` (order-independent; no float residual, no `R_num`). Gate:
+    53	`test_transfer_exact_int`, `test_close_books_order_independent`, `test_transfer_no_negative`
+    54	(`(src_q >= 0).all()`). Currency/quanta: mass `q_mass = 1e-9` mol (int64). **No energy currency at S0.**
+    55	
+    56	---
+    57	
+    58	## 4. The solver — one production solve, three branches (fixes round-4 #1)
+    59	
+    60	`M` is the symmetric **2×2** constrained added-mass matrix in the **x/z plane** `[[M00,M02],[M02,M22]]`;
+    61	`P = F_stream·Dt` is `[B,2]`; `F_stream = (tReact+tFin)·f̂ + fDrag` (`SwimEval.cs:804`). The vertical (y)
+    62	reaction is a **separate** statement (§4.3) — it is **not** a term in this 2-D equation.
+    63	
+    64	### 4.1 One canonical degeneracy predicate — `κ > KAPPA_MAX`
+    65	
+    66	```python
+    67	tr   = M00 + M22                                     # > 0 for any valid SPD body
+    68	det  = M00*M22 - M02*M02
+    69	disc = torch.sqrt((M00 - M22)**2 + 4*M02**2)         # cancellation-free (Rev-3 §7.2)
+    70	lam_max = 0.5*(tr + disc)
+    71	det_safe = torch.where(det.abs() < DET_FLOOR, torch.full_like(det, DET_FLOOR), det)   # keep eager values finite
+    72	lam_min  = det_safe / lam_max                        # stable small eigenvalue
+    73	kappa    = lam_max / lam_min                          # condition number
+    74	```
+    75	
+    76	`REGULARIZED`/`EXACT` are decided by the **single** predicate `κ > KAPPA_MAX` — **not** `det < det_floor`
+    77	(the two are not equivalent; `κ` is the retained Rev-3 criterion). `det_safe` exists **only** to keep the
+    78	eagerly-evaluated `κ` and `Δv_exact` finite on bodies that will be discarded by the select (see 4.2).
+    79	
+    80	### 4.2 Three branches, safe eager evaluation, single select
+    81	
+    82	`torch.where` does **not** short-circuit, so **both** branch solves are computed for **all** bodies before
+    83	selection. Each must therefore be finite on every body:
+    84	
+    85	```python
+    86	INVALID     = ~body_valid                              # empty / zero-mass
+    87	REGULARIZED = body_valid & (kappa > KAPPA_MAX)          # valid but ill-conditioned
+    88	EXACT       = body_valid & (kappa <= KAPPA_MAX)         # common path
+    89	
+    90	reg = EPS_SPD * tr                                      # > 0; used only where REGULARIZED
+    91	
+    92	def solve_2x2(a, b, c, Px, Pz, denom):                 # M = [[a,b],[b,c]]; returns [B,2]
+    93	    dvx = ( c*Px - b*Pz) / denom
+    94	    dvz = (-b*Px + a*Pz) / denom
+    95	    return torch.stack([dvx, dvz], dim=-1)
+    96	
+    97	Δv_exact = solve_2x2(M00,      M02, M22,      Px, Pz, det_safe)                 # finite everywhere via det_safe
+    98	det_reg  = (M00+reg)*(M22+reg) - M02*M02                                        # SPD (reg>0) ⇒ bounded > 0
+    99	Δv_reg   = solve_2x2(M00+reg,  M02, M22+reg,  Px, Pz, det_reg)                  # inherently safe, no clamp needed
+   100	
+   101	Δv    = torch.where(INVALID[...,None], 0.0,
+   102	          torch.where(REGULARIZED[...,None], Δv_reg, Δv_exact))                 # [B,2]
+   103	J_reg = torch.where(REGULARIZED[...,None], -reg[...,None] * Δv_reg, 0.0)        # [B,2]  ← the − sign
+   104	```
+   105	
+   106	- **`Δv_exact` is finite on every body** because it divides by `det_safe` (≥ `DET_FLOOR` in magnitude); on
+   107	  the `EXACT` branch `κ ≤ KAPPA_MAX` ⇒ `det` is well clear of `DET_FLOOR` ⇒ `det_safe == det` (no effect).
+   108	- **`Δv_reg` is finite on every body** because `(M+reg·I)` is SPD with `reg > 0` ⇒ `det_reg` bounded away
+   109	  from 0, even for `M = 0` (`det_reg = reg² > 0`). No clamp required.
+   110	- **`INVALID` bodies output exactly `0`** (the outer select), regardless of the garbage in the discarded
+   111	  branches — finite, no `1/0`, no `0·∞`.
+   112	
+   113	### 4.3 The regularization sign and the 2-D vs vertical split
+   114	
+   115	`(M + reg·I)Δv = P` ⇒ `M Δv = P − reg·Δv`, so the **booked** regularization impulse is `J_reg = −reg·Δv`
+   116	(NOT `+reg·Δv`). Momentum closes **exactly in the 2-D x/z plane**:
+   117	
+   118	    M Δv = P + J_reg          (EXACT: J_reg = 0;  REGULARIZED: J_reg = −reg·Δv)     # 2×2, x/z only
+   119	
+   120	The **vertical reaction** `J_c` (`SwimEval.cs:807`) is a **separate 3-D statement**: it enforces
+   121	`v_y ≡ 0` and is **workless** (`J_c · v_mid = 0` because `v_y ≡ 0`). `J_c` does **not** appear in the 2-D
+   122	`M Δv = P + J_reg` equation above, nor in the 2-D work term of §5. It is stated once, here, as the
+   123	constraint that the frozen-heading path keeps `v_y = 0`.
+   124	
+   125	### 4.4 Solver gates
+   126	
+   127	- `test_reg_momentum_closes`: force `κ > KAPPA_MAX` on a 10:1 slender body; assert the **2-D**
+   128	  `M·Δv == P + J_reg` to f32 rel `< 1e-5`, and that flipping to `+reg·Δv` **fails** it (sign is load-bearing).
+   129	- `test_solve_dispatch_selects_reg`: a valid-degenerate body's output equals `Δv_reg`, not `Δv_exact`.
+   130	- `test_solve_finite_all_branches`: for empty/zero-mass and near-singular bodies, `Δv` and `κ` are finite
+   131	  (the eager `det_safe`/SPD guarantees hold) **before** any select.
+   132	- `test_reg_off_on_wellcond`: isotropic/H0 body, `κ ≤ KAPPA_MAX` ⇒ production == exact solve, `J_reg == 0`.
+   133	- `test_vertical_workless`: `v_y == 0` maintained; the vertical `J_c` does no work (`J_c·v_mid == 0`).
+   134	
+   135	---
+   136	
+   137	## 5. Energy — the f32 mechanical arm only (fixes round-4 gate-(b) meaning + normalization)
+   138	
+   139	**S0 has no int64 energy ledger.** Energy at S0 is entirely the **f32 mechanical physics**, in two gates
+   140	with distinct, non-overlapping meanings:
+   141	
+   142	### 5.1 Gate (a) — force-law algebraic identities (the two donor closures)
+   143	
+   144	```
+   145	U_cl = max(0, U)                                                          # donor clamp (SwimEval.cs:395)
+   146	(a.reactive):  InputPower           = m_t·U·V_t·W_t ≡ tReact·U   + pWake         # signed U
+   147	(a.fin):       CirculatoryInputPower = F_n·V_t       ≡ tFin·U_cl + pFin          # clamped U_cl
+   148	```
+   149	
+   150	Each is a **per-step algebraic identity**, tested to `rel < 1e-6` with the safe normalization
+   151	`den = max(|p_in|, ε)` (**|·|** — signed reactive power can make `p_in < 0`, so `max(p_in,ε)` was unsafe).
+   152	The one authoritative combined input power (used by the diagnostic and, later, S3) is
+   153	`p_in = (tReact·U + pWake) + (tFin·U_cl + pFin)` — `tFin·U_cl`, one clamp policy, everywhere.
+   154	
+   155	### 5.2 Gate (b) — the discrete KE balance `R_step` (the ONLY KE equation)
+   156	
+   157	Gate (b) **is** `R_step`, the exact discrete identity for the semi-implicit integrator with pose-varying
+   158	`M_eff` (the naive `ΔKE = (p_in − wake − drag)·dt` is deleted everywhere):
+   159	
+   160	```
+   161	constrained update (2-D):  M_{n+1}(v_{n+1} − v_n) = P + J_reg,   P = F_stream·Dt
+   162	ΔKE   = ½ v_{n+1}ᵀ M_{n+1} v_{n+1} − ½ v_nᵀ M_n v_n
+   163	R_step = ΔKE − v_mid·(F_stream·Dt + J_reg) − ½ v_nᵀ ΔM v_n          # v_mid = ½(v_n+v_{n+1});  ≈ 0
+   164	```
+   165	
+   166	The added-mass term `½ v_nᵀ ΔM v_n` is **mandatory**. `J_reg = −reg·Δv` (§4.3); on the EXACT branch
+   167	`J_reg = 0` ⇒ `R_step ≈ 0` by construction; on the REGULARIZED branch the `v_mid·J_reg` term makes it close
+   168	**with** the artificial damping present — the regularization energy lives **here, in the f32 `R_step` term**,
+   169	with **no int64 booking** (kinetic/mechanical energy has a single representation — the f32 body velocity —
+   170	so there is no int64 mirror; that would be the Law-4 anti-pattern). Threshold and bounded-oscillating drift
+   171	per gate (b) in §1.
+   172	
+   173	### 5.3 Kinetic energy is f32, and that is the whole story at S0
+   174	
+   175	`E_KE = ½ vᵀ M v` is derived from f32 velocity — its single canonical representation. It is **not** an int64
+   176	reservoir and there is no metabolic ledger at S0 to reconcile it against. (The honest treatment of energy as
+   177	a *metabolic-expenditure* int64 ledger **plus** an f32 total-energy invariant is an **S1/S3** matter, §9 —
+   178	it does not exist in the standalone locomotion kernel.)
+   179	
+   180	---
+   181	
+   182	## 6. Gain1 independent oracle (fixes round-4 #5 + the Jacobian)
+   183	
+   184	The kernel's added-mass/`gain1` path is validated against a **standalone, donor-free, torch-free** second
+   185	implementation `tools/gain1_oracle.py`, run once, with values committed to the fixture file.
+   186	
+   187	### 6.1 Frozen fixture inputs (literal — H1 canonical body)
+   188	
+   189	A single canonical slender body **H1**, semi-axes and state written as literal constants (the fixture file
+   190	commits exactly these):
+   191	
+   192	```
+   193	H1:  a = 0.50 m, b = 0.05 m, c = 0.05 m       # 10:1 prolate spheroid
+   194	     U = 0.30 m/s, V_t = 0.10 m/s, s = 0.20 (tail-tip lateral), m_t = π·ρ·b·c·(…)  # ρ_water = 1000 kg/m³
+   195	     pose = identity quaternion; frozen-heading f̂ = +x̂, n̂ = +ẑ
+   196	     (the committed fixture lists every scalar the kernel consumes for this body)
+   197	```
+   198	
+   199	### 6.2 Quadrature — 32-point Gauss–Legendre WITH the change-of-variable Jacobian
+   200	
+   201	The Lamb added-mass integrals `α0, β0, γ0` are `∫₀^∞ g(λ) dλ`. Map to `[0,1]` by `λ = (1−t)/t`, whose
+   202	Jacobian is `dλ = −dt / t²`; folding the sign into the limits:
+   203	
+   204	    ∫₀^∞ g(λ) dλ  =  ∫₀¹ g((1−t)/t) · (1/t²) dt        # the 1/t² Jacobian is REQUIRED (was omitted)
+   205	
+   206	evaluated by **32-point Gauss–Legendre** on `[0,1]` (nodes/weights from `numpy.polynomial.legendre.leggauss(32)`
+   207	mapped to `[0,1]`, committed and pinned; `test_gain1_quadrature_pinned` matches them bit-for-bit). Endpoint
+   208	`t → 0` (`λ → ∞`): the integrand `g` decays faster than `t²`, so `g/t²` is finite; the fixture asserts it.
+   209	
+   210	### 6.3 Tolerances & independence
+   211	
+   212	Fixture-vs-analytic `rel < 1e-6` (f64); kernel-vs-fixture `rel < 1e-4` (f32). `tools/gain1_oracle.py`
+   213	imports **nothing** from the donor `SwimEval` and **nothing** from the torch port (AST/import gate
+   214	`test_gain1_fixtures_donor_free`) — it is the independent second implementation that makes the oracle
+   215	non-circular. **This is a T11 deliverable**: the generator is committed, run once, and its outputs frozen
+   216	into the fixture file; the kernel test reads the frozen values.
+   217	
+   218	---
+   219	
+   220	## 7. Throughput / affordability gate (d) (fixes round-4 #7 non-vacuous requirement)
+   221	
+   222	The S0 throughput sweep measures the **locomotion kernel** (§4–§5) over the staged cell funnel (Rev-3 §9,
+   223	hardware pinned: RTX 5070, 11 GiB cap, Ryzen 7 8700F). **An all-OOM sweep is a FAIL, not a vacuous pass:**
+   224	`assert n_valid_cells ≥ 1` before emitting the authorization number `φ_loco`; the affordability floor
+   225	`F_loco_S0 = 9.0e7` (Rev-3 §9.2) requires a real non-OOM measurement. Compile-warmup failure falls back to
+   226	eager (Rev-3 §9.4). *(The S2 feeding-stub op/tensor/byte model is an S2 concern, not measured here — §9.)*
+   227	
+   228	---
+   229	
+   230	## 8. S0 acceptance checklist (these are S0-DONE gates, not pre-code preconditions)
+   231	
+   232	Green to **complete** S0 (not "before S0 code begins"): `test_transfer_exact_int`,
+   233	`test_close_books_order_independent`, `test_transfer_no_negative`; the §4.4 solver gates; gate (a) the two
+   234	force-law closures; gate (b) `R_step` 1e5-step bounded-oscillating; gate (c) `test_oracle_gain1_analytic`
+   235	+ `test_gain1_quadrature_pinned` + `test_gain1_fixtures_donor_free`; gate (d) non-OOM `φ_loco ≥ F_loco_S0`.
+   236	
+   237	---
+   238	
+   239	## 9. Explicitly DEFERRED to S1/S3 — reviewed as we reach them (NOT S0 blockers)
+   240	
+   241	These round-4 findings are real and belong to later phases; they do **not** gate the standalone locomotion
+   242	kernel and are **not** specified here (owner: "review the other parts as we get to them"):
+   243	
+   244	- **Energy economy (S1/S3):** the int64 energy ledger reframed honestly as a **metabolic-expenditure** ledger
+   245	  (exact int64 accounting) **plus** an **f32 total-energy** invariant including KE — *not* "exact int64 total-
+   246	  energy conservation." Immediate-heat partition `P_basal + (1/η−1)·p_in` (mechanical `p_in` is work, not heat).
+   247	- **Feeding/reserve (S3):** the field-biomass(`Bp`)→consumer-reserve energy path (grazing a mass-only producer
+   248	  currently has no reserve to debit); reserve inflow partition; predation reserve transfer.
+   249	- **Reservoir completeness (S1):** restore **`Bm`** (remineralized biomass, `v1:408,414,443-445`) to the mass
+   250	  inventory; `E_sun_cum` is a cumulative **meter** (credit reserve *and* increment the meter — not "transfer
+   251	  out of" it); death `reserve → E_sun-return` semantics.
+   252	- **Cross-ledger transactions (S1/S3):** atomic growth (mass and energy legs capped together, not
+   253	  independently); grouped `[W,N_cap] reserve → [W] meter` reductions; aggregate int64 **sum** overflow bound
+   254	  (per-value `< 2^62` does not bound the sum).
+   255	- **RNG for mutation (S3):** Philox rejection-continuation packing, Box–Muller (fix the
+   256	  `(((w0>>8)&0xFFFFFF)+1)` precedence bug and the `≤ 2^-256` bound when the RNG scaffold lands); Tier-2 =
+   257	  reproducible integer draws + discrete decisions.
+   258	- **Feeding-stub throughput (S2):** the `[B,K]` gather/mask/segment-sum op/tensor/byte model (include
+   259	  `neigh_idx`, `dist2` dtype, pinned `K`).
+
+codex
+The solver’s headline safety claim already fails at the required empty-body case: with `M=0`, the spec defines `tr=0`, hence `reg=0`, `det_reg=0`, and the eagerly computed regularized solve is `0/0`. I’m checking the referenced Rev-3 definitions and the remaining gates now for any additional contradictions.
+exec
+/usr/bin/zsh -lc "nl -ba docs/superpowers/reviews/2026-07-12-codex-round4-of-rev4.md && rg -n -C 5 \"7\\.2|lam_min|kappa|det_safe|gain1|H1|R_step|KAPPA_MAX|non-OOM|authorization\" docs/superpowers/plans/2026-07-12-sirrobin-plan-rev3-reconciliation.md" in /mnt/c/Users/cddal/SirRobin
+ succeeded in 0ms:
+     1	# Codex — Round 4 Review of Rev-4
+     2	
+     3	**Date:** 2026-07-12 · Codex `gpt-5.6-sol`, high reasoning, read-only. (Full trace: `codex-rev4-raw.txt`.)
+     4	**Overall verdict: NOT APPROVABLE to begin S0 yet — but "close enough to justify continuing preparatory
+     5	scaffold work."** Crucially, round 4 **separates real S0 blockers (5, small, mostly mechanical/code) from
+     6	S1/S3-phase findings (the whole energy-economy pile).**
+     7	
+     8	## The one deep, correct critique (D2)
+     9	
+    10	Codex's central finding is **right and worth internalizing**: the int64 energy ledger I built is *"an
+    11	exactly balanced expenditure ledger, not conservation of the simulator's total physical energy."* The
+    12	"metabolic ledger closes exactly, KE is f32-only, consistent at gait-cycle scale" argument is **conditional**
+    13	— it holds only if the gait is truly periodic (`∮ΔKE=0`), all mechanical work dissipates locally, and there's
+    14	no net acceleration/export/transient. Locomotion doesn't guarantee those, so there's a real per-step physical
+    15	gap; excluding KE from the equality and calling it "never an int64 leak" is *category-switching* (the quantity
+    16	is omitted, not conserved). Also: booking the **full** `p_in/η` as heat overstates transient heat — the
+    17	correct immediate-heat partition is `P_basal + (1/η−1)·p_in`, with the remaining `p_in` being mechanical work
+    18	(Rev-2's partition was right).
+    19	
+    20	**The honest reframe Codex hands us (rec #4):** *"Reframe D2 as a metabolic-expenditure ledger, or restore a
+    21	physically complete hybrid energy balance. Do not call the current reduced sum total energy conservation."*
+    22	→ **Mass** gets exact-int64 *conservation*. **Energy** gets (a) an exact-int64 metabolic-**expenditure**
+    23	ledger (accounting; closes tautologically) **plus** (b) a **total-energy** invariant at f32 tolerance that
+    24	includes KE. Same hybrid the plan already uses for mass-exact vs physics-tolerance — applied honestly to
+    25	energy. The two-currency *direction survived*; only the "energy is exact-int64 conservation" overclaim dies.
+    26	
+    27	## The seven required changes (round-4 scores)
+    28	
+    29	1. **PARTIAL — solver.** Sign now correct (`J_reg=−rΔv`), but: dispatch predicate must be exactly
+    30	   `κ>KAPPA_MAX` (not `det<det_floor`, "not generally equivalent"); both eager branch solves need safe
+    31	   denominators (`where` doesn't short-circuit → the un-selected singular branch NaNs first); the 2-D x/z
+    32	   momentum eq wrongly adds the **vertical** `J_c` (dimensionally wrong — `J_c` is a separate 3-D statement).
+    33	2. **STILL-BROKEN — energy.** The D2 expenditure-vs-conservation issue above; plus retained S1/S3 flux/tests
+    34	   still use float `E_chem`/`E_KE` (Rev-2 `:899-923`) that Rev-4 didn't cleanly replace.
+    35	3. **STILL-BROKEN — feeding/reserve.** Grazing a producer `Bp` (mass-only, no reserve pool) gives the grazer
+    36	   no reserve inflow — only creature-on-creature predation transfers reserve. The field-biomass→consumer-
+    37	   reserve path is still absent (an S3 energy-economy design task).
+    38	4. **PARTIAL — RNG.** Dedicated `attempt` bits exist, but `gene_iid+draw_index→element` packing unspecified;
+    39	   Box–Muller has a **precedence bug** (`((w0>>8)&0xFFFFFF)+1` needs the inner parens); probability should be
+    40	   `≤2^-256` not `<` (at `p_accept=0.5` it's exactly `2^-256`).
+    41	5. **STILL-BROKEN — gain1 fixtures.** Method specified but literal inputs + expected values not committed
+    42	   (still a T11 deliverable). **Real math bug:** the `λ=(1−t)/t` map omits the `1/t²` Jacobian.
+    43	6. **RESOLVED — #17.** Seven mutation symbols named; `S_max`→`N_max/E_max` fixed.
+    44	7. **PARTIAL — feeding stub.** All-OOM fails correctly, but byte model omits `neigh_idx`/`dist2` reads,
+    45	   `dist2` dtype unspecified, `K` unpinned.
+    46	
+    47	## Internal-consistency audit: still FAIL (but the surviving items are nameable)
+    48	
+    49	- Gate (b) has two meanings — D2.5 calls the **force-law algebraic identity** "gate (b)," but Rev-3's gate (b)
+    50	  is `R_step`. (Fix: gate (b) = `R_step`; the §6.1 force-law identities are the separate **gate (a)** subtests.
+    51	  My relabeling introduced this.)
+    52	- 2-D `M`/`P` vs vertical `J_c` (finding #1).
+    53	- Degeneracy predicate `det<det_floor` vs retained `κ>KAPPA_MAX`.
+    54	- `where` doesn't short-circuit → INVALID branch isn't NaN-safe as claimed.
+    55	- Retained S1 biomass-energy processes (`E_chem(Bp/Bd/Bm)`, Rev-2 `:862-893`) have no D2 representation.
+    56	- Mass inventory omits **`Bm`** (remineralized biomass, `v1:408,414,443-445`) — I added `Bp`, missed `Bm`.
+    57	
+    58	## New Rev-4 problems
+    59	- Box–Muller precedence (above). · `p_accept=0.5` gives exactly `2^-256`. · `max(p_in,ε)` unsafe when signed
+    60	  reactive power makes `p_in<0` → use `max(|p_in|,ε)`. · gain1 Jacobian omission (above). · feeding-stub byte
+    61	  count incomplete.
+    62	- Transaction defects (all S1/S3): `E_sun_cum` is a cumulative **meter**, not a source reservoir — can't
+    63	  "transfer out of" it (external input credits reserve *and* increments the meter); death `reserve→E_sun-
+    64	  return` ambiguous; `transfer_quanta` is elementwise but `[W,N_cap] reserve → [W] heat` needs a grouped
+    65	  reduction; growth's two ledgers can cap **independently** (not atomic); per-value `<2^62` check doesn't
+    66	  bound the multi-term **sum** (need aggregate bound / wider accumulator).
+    67	
+    68	## Phase split (Codex's own, verbatim in substance)
+    69	
+    70	**Real S0 / SpikeSwim blockers (5):**
+    71	1. Unify gate (b) = `R_step`; keep force-law identities as separate algebraic (a) subtests.
+    72	2. Executable solver: one `κ>KAPPA_MAX` predicate, safe denominators for the eager branches, 2-D `MΔv=P+J_reg`
+    73	   separated from the 3-D vertical `J_c`.
+    74	3. Commit literal H1 gain1 fixture inputs + expected values.
+    75	4. Correct the gain1 quadrature mapping/Jacobian.
+    76	5. Preserve the non-OOM S0 authorization requirement (already done — keep).
+    77	
+    78	**Later-phase (S1/S3) blockers — do NOT gate the standalone locomotion kernel:** D2's biomass/reserve/heat
+    79	architecture, missing `Bm`, grazing reserve source, atomic growth caps, death semantics, grouped energy
+    80	transfers, overflow-sum proof; RNG mutation details (S3, though fix the Box–Muller/parser bug when the RNG
+    81	scaffold lands); feeding stub (gates provisional G-E2E at S2→S3). *"S0 has no ecology, genome mutation, or
+    82	steering (`v1:277`), and scaffold conservation runs on a fake reservoir (`v1:25`). D2 therefore should not
+    83	block writing unrelated S0 code—but the live S0 solver, gate, and oracle contradictions do."*
+    84	
+    85	## Closing line (verbatim)
+    86	> "Rev-4 is close enough to justify continuing preparatory scaffold work, but not yet internally coherent
+    87	> enough to authorize the SpikeSwim implementation plan as written."
+57-
+58-| § | Canonical decision | Closes (Codex findings) | Closes (new problems) | Blocker |
+59-|---|---|---|---|---|
+60-| 1 | int64 fixed-point quanta reservoirs | #5 STILL-BROKEN | NP-9 (f64 policy) | B1 |
+61-| 2 | one segment layout: slot-0 sentinel, real `[1..S_max]` | #4, #9 (indexing half) | NP-1 (eager-gather) | B2, B8(gathers) |
+62:| 3 | empty/zero-mass finiteness (det_safe + mask) | #9 (finiteness half) | NP-2 (non-finite solver) | B3 |
+63-| 4 | one RNG allocator + world-keyed Philox | #13, #14 (allocator) | NP-4, NP-5, NP-6 | B6 |
+64-| 5 | single source of truth: `energy`/`struct_N` in ColonyState only | #14 | NP-10 (dup state) | — |
+65-| 6 | one energy equation (`U_cl` consistent; exact discrete balance) | #1, #15 STILL-BROKEN | NP-7, NP-8 | B5 |
+66-| 7 | regularization ledgered (exact solve gates; stable κ) | #2, #12 | NP-3 (reg invalidates KKT) | B4 |
+67:| 8 | independent closed-form gain1 fixtures | #8 | — | B7 |
+68-| 9 | throughput/benchmark reconciliation | #6, #19, #20 | — | B8(hardware) |
+69-| 10 | import firewall: `core/snapshot.py` + `core.contracts` snapshot view | #18 | NP-11 (drift guard) | — |
+70-
+71----
+72-
+--
+204-# 2x2 constrained system (resolution 7): M = [[M00,M02],[M02,M22]], P=(Px,Pz)
+205-tr    = M00 + M22                                    # natural scale
+206-det   = M00*M22 - M02*M02
+207-scale = tr*tr                                        # scale of det
+208-degenerate = (~body_valid) | (det.abs() <= EPS_REL*scale)     # EPS_REL ~ 1e-10 (f32-relative)
+209:det_safe   = torch.where(degenerate, torch.ones_like(det), det)
+210:dvx = ( M22*Px - M02*Pz) / det_safe
+211:dvz = (-M02*Px + M00*Pz) / det_safe
+212-dvx = torch.where(body_valid, dvx, torch.zeros_like(dvx))     # empty/invalid -> zero accel, finite
+213-dvz = torch.where(body_valid, dvz, torch.zeros_like(dvz))
+214-```
+215-
+216:For an empty body `M00=M02=M22=0` and `P=0` (no segments ⇒ `F_stream=0`): `det=0 → det_safe=1 → dv=0/1=0`, then masked to 0. **Output is finite (zero accel).** For a *valid but near-singular* body (slender/anisotropic), `degenerate` is triggered only by the scale-relative `det` test, and the regularized path of resolution 7 handles it *with the reaction impulse ledgered* — it is **not** silently floored here. The absolute `1e-12` floor (`SwimEval.cs:1157`) is retained **only** inside `solve_sym3_donor` for gain0 byte-conformance (resolution 7), never in production.
+217-
+218-**Test (`test_solve.py::empty_zero_mass_finite`):** a batch containing (i) an empty body, (ii) a single zero-mass sentinel-only body, (iii) a `MinX/Y/Z`-clamped `0.12×0.12×0.3` degenerate body (`SwimEval.cs:75`), (iv) a valid body — assert all outputs finite; empty/zero-mass rows exactly `0`; valid row matches oracle rel `<1e-4`; no `inf`/`nan` anywhere (`torch.isfinite(dv).all()`).
+219-
+220----
+221-
+--
+374-```
+375-constrained update:  M_{n+1}(v_{n+1} - v_n) = P + J_c + J_reg,   P = F_stream·Dt,  v_y ≡ 0
+376-ΔKE ≡ ½v_{n+1}ᵀM_{n+1}v_{n+1} − ½v_nᵀM_n v_n
+377-    = v_mid·(P + J_c + J_reg) + ½ v_nᵀ(M_{n+1}−M_n) v_n
+378-    = v_mid·(F_stream·Dt + J_reg) + ½ v_nᵀ ΔM v_n           # J_c·v_mid = 0 (workless: v_y≡0)
+379:R_step = ΔKE − v_mid·(F_stream·Dt + J_reg) − ½ v_nᵀ ΔM v_n   # ≈ 0 by construction
+380-```
+381-
+382:`F_stream = (tReact+tFin)·f̂ + fDrag` (`SwimEval.cs:804`). The `½vᵀΔMv` added-mass term is **mandatory** (its omission was Codex #1's and #15's shared error). `J_c` (vertical plane reaction, `SwimEval.cs:807`) is workless. `v_mid·J_reg` (regularization work) is booked into the numerical-residual energy ledger (resolution 7) so the books close even when regularization fires; on the normal path `J_reg=0` and `R_step≈0`. **This single `R_step` gate is used by S0 (`discrete_balance_1e5`) and inherited unchanged by S3 (`S3-ENERGY-3` now *references* it rather than restating a naive form).** Threshold: `|R_step|/max(KE_n,ε) < 1e-6` (f64 arm) / `< 1e-3` (f32 hot), gated on the drift curve being bounded-oscillating (Rev-2 §1(b)).
+383-
+384-### 6.3 The one reserve→outflow chain (mechanics = ecology; closes NP-7, NP-8, #15)
+385-
+386-There is **one** energy accounting, consumed identically by the kernel (S0/S2) and the economy (S3). Per creature per step:
+387-
+--
+389-reserve draw (F-M):   ΔE_reserve = −(P_basal + p_in/η)·dt          P_basal = B0·M^α (Kleiber, α≈0.79)
+390-of which p_in/η:      p_in·dt          -> mechanical work delivered to the body–fluid system
+391-                      (1/η − 1)·p_in·dt -> muscle-inefficiency heat  -> E_heat
+392-                      P_basal·dt        -> basal heat                -> E_heat
+393-mechanical p_in·dt then partitions (the §6.2 physics balance):
+394:                      ΔE_KE            = v_mid·F_stream·Dt + ½vᵀΔMv  (the R_step≈0 identity)
+395-                      (pWake+pFin+wDrag)·dt -> shed wake + fin wake + axial drag -> E_heat
+396-```
+397-
+398-`p_in`, `pWake`, `pFin`, `wDrag`, `ΔE_KE`, `½vᵀΔMv`, `v_mid·J_reg` are the **StepLedger fluxes** the S0 kernel emits (`SwimEval.cs:814` accumulates `(pWake+pFin+wDrag)·dt` as MechWork; S0 additionally emits `ΔE_KE` and the added-mass term). S3 consumes these *authoritative* values — it never redefines the KE relation. This is the single equation NP-8 demanded: `p_in` (muscle→fluid) ≠ COM thrust work `f̂·v_mid·(tReact+tFin)` — they differ by exactly the wake/entrainment energy `(pWake+pFin)` — and the ledger accounts for the difference explicitly, so mechanics (#1) and ecology (#15) cannot disagree.
+399-
+--
+409-```
+410-INV-ENERGY (bookkeeping, EXACT int64):
+411-  Σ_stored_q(t) == Σ_stored_q(0) + E_sun_cum_q − E_heat_cum_q − E_export_cum_q
+412-  where the stored/meter energy quanta close by resolution 1's exact integer equality
+413-INV-ENERGY (physics consistency, f32 tolerance):
+414:  the E_KE term (f32 kernel) tracks the §6.2 R_step balance to τ_E_phys=1e-6/step, 1e-4 drift, bounded-oscillating
+415-```
+416-
+417-### 6.5 Tests
+418-
+419:`test_energy_uses_Ucl_everywhere` (AST: every `tFin·…` term uses `U_cl=max(0,U)`; no signed-`U` fin term exists). `test_no_naive_ke_gate` (AST: the string/expression `ΔKE=(p_in−wake−drag)dt` exists nowhere; the only KE gate is `R_step`). `test_struct_energy_counted_once` (grazing then death cycle: `Σ_stored_q` exact-closes; `E_chem` never assigned to a stored pool). `S3-ENERGY-3` (rewritten): "inherits the S0 `R_step` gate verbatim" — not a restated equation.
+420-
+421----
+422-
+423-## 7. Regularization ledgered (repairs Codex #2 + #12; closes NP-3)
+424-
+--
+430-```
+431-[ M00 M02 ][dvx]   [Px]
+432-[ M02 M22 ][dvz] = [Pz]      P = F_stream·Dt,   dv_y = 0
+433-J_y = M01·dvx + M12·dvz − Py   (vertical reaction impulse, workless; ledger only)
+434-```
+435:**For every conservation gate (INV-CONSERVE, INV-ENERGY, `R_step`, momentum), the solve is the exact unregularized system.** Regularization is a numerical fallback that is *permitted only* for a valid-but-near-singular `M` — and empty/degenerate bodies are already excluded by the resolution-3 sentinel/`body_valid` mask, so the fallback fires only for genuinely ill-conditioned real bodies (10:1 slender, extreme anisotropy), never for empties.
+436-
+437:### 7.2 Numerically stable condition estimate (replaces `λ_min=(tr−disc)/2`; handles `tr=0`)
+438-
+439-The cancellation-prone `λ_min = (tr − disc)/2` (Rev-2 §12) is replaced by a cancellation-free form. For the symmetric 2×2 `[[M00,M02],[M02,M22]]` (SPD by construction: `M_body·I + Σ SPD added-mass`):
+440-```
+441-tr    = M00 + M22
+442-det   = M00*M22 − M02*M02
+443-disc  = sqrt( (M00 − M22)^2 + 4*M02^2 )     # NO cancellation: sum of squares, always >= 0
+444-lam_max = 0.5*(tr + disc)                    # well-conditioned (sum of positives)
+445:lam_min = det / max(lam_max, TINY)           # EXACT (lam_min*lam_max = det); avoids (tr−disc) cancellation
+446:kappa   = lam_max / max(lam_min, eps_rel*tr) # condition number
+447-```
+448:`disc = sqrt((M00−M22)² + 4M02²)` never subtracts large near-equal quantities (the donor/Rev-2 `tr²−4det` form does). `lam_min = det/lam_max` is exact and stable. **`tr=0` is not a special case here** — it can only occur for an invalid/empty body, which resolution 3 masks out *before* this code (`body_valid=False ⇒ result forced to 0`); a valid SPD body has `tr>0`. The `TINY`/`eps_rel·tr` guards prevent `0/0` only on the already-masked degenerate path.
+449-
+450-### 7.3 When regularization fires, its impulse and work are ledgered (closes #2, NP-3, B4)
+451-
+452-```
+453:reg    = where(body_valid & (kappa > KAPPA_MAX), EPS_SPD*tr, 0.0)   # KAPPA_MAX = 1e6 (f32)
+454-Mr00,Mr22 = M00+reg, M22+reg
+455-dv_reg = solve_2x2(Mr00, M02, Mr22, Px, Pz)                          # regularized dynamics (numerical fallback)
+456-# the regularization changed the momentum balance by:
+457-J_reg  = [ (Mr00-M00)*dvx_reg + 0,  (Mr22-M22)*dvz_reg ]  = reg * dv_reg   # reaction impulse from Tikhonov mass
+458-```
+459:`J_reg` is recorded so **momentum still closes**: `M·dv = P + J_c + J_reg` is now *true* (the added `reg·dv` is booked, not hidden). Its **work** `v_mid·J_reg` enters the numerical-residual **energy** ledger (resolution 1, int64 quanta), so `R_step` (resolution 6.2) closes with `J_reg` present. Regularization is thus a *ledgered numerical event*, not an invisible dynamics change. On the overwhelmingly-common well-conditioned path `reg=0`, `J_reg=0`, and production == exact solve bit-for-bit.
+460-
+461-**Regularization is never permitted in the gain0 donor-conformance path:** `solve_sym3_donor` (Rev-2 §12, reproducing `SwimEval.cs:1151-1166` byte-for-byte incl. the absolute `1e-12` floor) is used *only* to match untouched-donor gain0 fixtures; it never regularizes. Production `solve_constrained_xz` regularizes-and-ledgers. `test_solve.py::donor_conformance` asserts they agree on well-conditioned bodies.
+462-
+463-### 7.4 Tests
+464-
+465:`test_reg_momentum_closes` (force `κ>KAPPA_MAX` with a 10:1 slender body; assert `M·dv == P + J_c + J_reg` to f32 rel `<1e-5`, and that dropping `J_reg` makes it fail — proving the ledger is load-bearing). `test_reg_energy_ledgered` (assert `R_step` closes with `v_mid·J_reg` booked, fails without it). `test_stable_kappa_no_cancellation` (extreme-anisotropy corpus, Rev-2 §12: assert `disc` and `lam_min=det/lam_max` match a f64 eigen-reference to f32 rel `<1e-5`, whereas `(tr−disc)/2` diverges — proving the stable form is load-bearing). `test_reg_off_on_wellcond` (isotropic/H0: `reg==0`, production == exact solve, `max_abs(Δ)==0`).
+466-
+467----
+468-
+469:## 8. Independent, closed-form gain1 oracle fixtures (closes Codex #8)
+470-
+471:**Closes:** Codex **#8** (committed to untouched-gain0 + independent-analytic-gain1 but never specified the gain1 construction; H1/H2 fixtures were still regenerated from a *patched* donor — residual circularity) and blocker **B7** (supply an actual independent gain1 fixture spec). Strengthens Law 1 (fidelity validated against theory, not a self-referential oracle).
+472-
+473:**Decision.** gain1 fixtures are **closed-form analytic values derived from first principles, independent of any donor build**. The patched-donor regeneration of Rev-2 §2 (for the bug-active tilted/fin fixtures) is **replaced** by the analytic single-step construction below — this removes the circularity Codex flagged.
+474-
+475-### 8.1 Analytic primitives (with sources)
+476-
+477:- **Ellipsoid inertial mass (gain1):** `m = ρ·(4/3)·π·a·b·c` for semi-axes `(a,b,c)`. (Matches the donor gain1 path `massBox·(π/6)` since `(π/6)(2a)(2b)(2c) = (4/3)πabc`, `SwimEval.cs:88,173-174` — but derived, not read from the donor.)
+478-- **Lamb added-mass coefficients:** the standard ellipsoid integrals (Lamb, *Hydrodynamics* 1932, §114):
+479-  `α0 = a·b·c ∫₀^∞ dλ / ((a²+λ)·Δ(λ))`, similarly `β0` (`b²`), `γ0` (`c²`), `Δ=√((a²+λ)(b²+λ)(c²+λ))`, with `α0+β0+γ0=2`. Added-mass factor per axis `k_i = α0/(2−α0)`, etc. Added mass `m_a,i = k_i·ρ·V`, `V=(4/3)πabc`. Evaluate the integrals to f64 by an *independent* high-order quadrature (e.g. Gauss–Kronrod in the fixture generator — deliberately a *different* scheme from the donor's fixed 2048-interval Simpson at `SwimEval.cs:263`, so agreement is corroboration, not tautology). Sphere check: `a=b=c ⇒ k=0.5` each.
+480-- **Single-step reactive force (Lighthill EBT):** at a stated pose + velocity `(U, V_t, s, m_t)`, `T_react = ½ m_t (V_t² − U² s²)` and `P_wake = ½ m_t U_cl W_t²`, `W_t = V_t + U s` (Lighthill 1960/71; `SwimEval.cs:326,341,355`) — evaluated by the closed-form expression, not the integrator.
+481-- **Single-step fin force (Garrick):** `L = q·C_L`, `D = q·C_Di`, `q = ½ρ U_cl² S`, `C_L = a_L·α`, `C_Di = C_d0 + C_L²/(π e AR)`, `T_fin = L·sinβ − D·cosβ`, `P_fin = D·Q` (Garrick 1936; `SwimEval.cs:392-408`).
+482-- **Single-step momentum:** `momentum = (m + m_added)·v`; for an all-sphere body `M_eff = (m_body + Σ m_a)·I` is constant and isotropic, so `(v_final·f̂)·(m_body + Σ m_a) = Σ T·Dt` exactly (the L6 identity, `SwimEval.cs:1205-1210`), computed analytically.
+--
+484-### 8.2 Fixture provenance rules
+485-
+486-| fixture class | source | validation |
+487-|---|---|---|
+488-| gain0 (byte-conformance) | **untouched donor** build, byte-for-byte | `solve_sym3_donor`, quat, LambK ported bit-exact vs recorded traces |
+489:| gain1 axial / isotropic | **closed-form** (§8.1) | analytic mass/added-mass/force/momentum; sphere `k=0.5` |
+490:| gain1 tilted / anisotropic (was patched-donor) | **closed-form single-step** (§8.1) | analytic `M_eff = Σ R·diag(m_a)·Rᵀ` at the stated pose, analytic `F_stream`, analytic 2×2 KKT `dv` — **no donor, patched or otherwise** |
+491:| gain1 fin-tail | **closed-form** Garrick (§8.1) | analytic `T_fin`, `P_fin`, `p_in = tReact·U + pWake + tFin·U_cl + pFin` |
+492-
+493:**Gate `test_oracle_gain1_analytic`:** each gain1 fixture value is reproduced by the kernel to f32 rel `<1e-4`; the fixture generator imports **nothing** from the donor (AST/import audit: `test_gain1_fixtures_donor_free`). **Gate `test_no_patched_donor`:** grep/AST — no fixture is produced by a donor with `SolveSym3`/`_vCom.y=0`/`ellipMassGain` modified. The Rev-2 §2 "narrowly-reviewed patched donor" clause is **deleted**; the tilted-solve regression (`tilted_solve_divergence`) now compares the kernel's 2×2 result to the **analytic** 2×2 KKT solution, not a patched-donor recording.
+494-
+495----
+496-
+497-## 9. Throughput / benchmark reconciliation (Codex #6, #19, #20)
+498-
+--
+515-```
+516-At near-term batch `B = W·N_cap ≈ 1024`, `9.0e7` c-steps/s ⇒ **≤ 11.4 µs/full-articulated-step** — a looser, honest target than the double-counted `1.4e8` (7.3 µs). The `256-world×1000×120 = 3.07e7` figure remains the S8-era many-worlds realtime target only. Gate-(d) text (Rev-2 §6.4) updated: floor = `F_loco_S0 = 9.0e7`.
+517-
+518-### 9.3 No flattened prototype required (fixes #19)
+519-
+520:Rev-2 §19.2 Stage 4 required a *flattened prototype* to measure masking tax — but the flattened/arena layout is a **deferred** optimization (Rev-2 §4.6). **Decision: Stage 4 is replaced by an *analytic + same-layout* masking-tax estimate.** The `S_slot/mean_seg ≈ 17/6 ≈ 2.8×` waste is reported analytically, and cross-checked empirically by timing the canonical `[B,S_slot]` kernel at the H1 mean-segment count vs at full `S_slot` occupancy (both on the *same* padded layout — no separate flattened implementation built). This keeps the deferred representation deferred (Law 7, grow-on-demand) while still quantifying the tax. Stage 4 cell count: 2 (same-layout occupancy sweep), 0 prototype builds.
+521-
+522-### 9.4 Hardware pins parameterized (fixes #19; hardware half of B8)
+523-
+524-The following are explicit owner-supplied parameters, **not** resolved here:
+525-```
+--
+529-```
+530-`bench.py`'s `vram_cap` (Rev-2 §19.3 `"<PIN Q#1>"`) reads this pin; a cell exceeding it is recorded `OOM-skip` (logs `max_memory_allocated`), never a gate-(d) fail. **Compile-warmup-failure behavior (Rev-2 gap):** if r1/r2 warmup fails to reach the `<2%` step-time convergence within `max 10` iters, the cell is recorded `warmup-fail` and **falls back to the r0 (eager) number for that (device,B)** with a logged flag — it is not silently dropped and does not fail the gate; the ladder (§5.8) then decides on the r0 number.
+531-
+532-### 9.5 Risks stay ACTIVE until verified in code (fixes #20)
+533-
+534:Codex #20: Rev-2 §20.1 marked "deterministic ragged reduction," "flattened-churn static capture," and "f32 conservation drift" **RETIRED** — but the birth gather was unsafe (NP-1), the layouts conflicted (#4), and the residual had the wrong sign (#5). **Decision: reclassify all three from "RETIRED" to "resolved-in-spec / verify-in-code (ACTIVE)".** They remain in the *active* register with mitigation "Rev-3 §2/§1/§4 fix specified; gate green required before close" until the Rev-3 tests (`test_no_negative_gather_index`, `test_close_books_order_independent`, `test_transfer_exact_int`, `test_layout_capacity`, graph-pointer stability T14) pass in code. No risk is retired on the strength of a spec alone. The register's top ranks (energy-gate correctness, end-to-end throughput, gain1 independence, S1 closure realizability) are unchanged.
+535-
+536-### 9.6 Tests / gates
+537-
+538-`test_headroom_no_double_count` (assert the S0 floor derivation contains no factor evaluated twice at `N_cap`). `test_ge2e_dependencies` (G-E2E's dependency set is exactly {S2, feeding-stub}, provisional; re-confirm gate post-S3). `test_bench_no_flattened_build` (AST: the benchmark builds no flattened/arena layout). `test_risk_register_no_premature_retire` (the three §9.5 risks are `ACTIVE` until their named Rev-3 gates are green).
+539-
+--
+590-## Cross-section consistency ledger (what changed, so no two sections disagree)
+591-
+592-- **Reservoir dtype is int64 quanta (§1)**, superseding Rev-2 §4.3/§5.1's f64 promotion of `energy`/`struct_N`. NP-9 dissolves: there is no f64 reservoir; the whole-tick int64 cost is measured by G-E2E (§9.1).
+593-- **`energy`/`struct_N` are int64 in ColonyState only (§5)**, summed as *derived* totals for the ledger (§1). No `reservoirs['energy']`. `E_chem` is always the derived readout `e_N·struct_N` (§6.4).
+594-- **One segment layout: `S_slot=17`, slot-0 sentinel, real `[1..S_max=16]`, parent=0 for roots (§2).** All of Rev-2 §4.2 (self-parent), §9 (`-1`), and the "capacity 15" concern are void. Reductions and `masked_segment_sum` unchanged.
+595:- **The solve (§3 finiteness + §7 regularization) is one function:** `body_valid` mask → exact 2×2 for conservation gates → ledgered `J_reg` only for valid near-singular bodies → `det_safe` + zero-mask for invalid/empty. `solve_sym3_donor` is gain0-only and never regularizes (§7.3, §8.2).
+596:- **`p_in = tReact·U + pWake + tFin·U_cl + pFin` with `U_cl=max(0,U)` (§6.1)** is the single input-power symbol used by the S0 gate, the ecology ledger, and the diagnostic. The naive `ΔKE=(p_in−wake−drag)dt` is deleted (§6.2). `R_step` (with `½vᵀΔMv`, `J_c`, `J_reg`) is the one KE gate, inherited by S3.
+597-- **RNG key includes `world_id` (§4.2); allocator is per-world on-device `next_eid[W]` (§4.1).** The Rev-2 §4.4/§14 host `next_stable_id` is deleted; §13's per-world counter is kept but now world-keyed. event_kind enum includes `PARAM_MUT`/`STRUCT_TOGGLE` (§4.3), reconciling §13 and §17.
+598-- **`safetensors>=0.4.3` pinned (§5); `core.snapshot` enumerated in the firewall, S7 reads via `core.contracts` (§10).**
+599-
+600----
+601-
+--
+606-1. `vram_cap` = **11 GiB** — RTX 5070 (12 GiB GDDR7, ~11 usable). Feeds `bench.py`'s OOM-skip policy (§9.4). ✔ pinned 2026-07-12.
+607-2. `gpu_model` = **RTX 5070** (Blackwell; strong FP32, FP64 ~1:64 → f64 kept to LambK + validation only). Determines the `(device)` axis winner. ✔ pinned.
+608-3. `cpu_model` = **AMD Ryzen 7 8700F** (Zen 4, 8 cores / 16 threads; CPU-rung baseline = 16 threads). ✔ pinned.
+609-4. `W_budget` = **12 h / overnight cadence** — the owner-accepted default behind `F_sci=2.31e7` (§9.2); revisit only if the run-iteration cadence changes. ✔ pinned.
+610-
+611:All four are `bench.py`/`Config` parameters; none blocks writing S0 code, and each is logged in the bench manifest so the authorization number is auditable.
+612-
+613----
+614-
+615-## Updated S0 pre-flight checklist (must be true before S0 code begins)
+616-
+617-Concrete decisions Rev-2 + Rev-3 have now settled; each has a named gate that must be green:
+618-
+619-1. **Reservoirs are int64 quanta** (`q_mass=1e-9` mol, `q_energy=1e-3` J); `transfer_quanta` is exact; `close_books` is an exact int64 `==`; flux carries are f64, bounded `[0,q)`, snapshotted. Gates: `test_transfer_exact_int`, `test_close_books_order_independent`, `test_carry_bounded_and_conservative`. (§1)
+620-2. **One segment layout:** `S_slot=17`, slot-0 identity sentinel, real `[1..16]`, root parent = 0, no `-1` anywhere (segments or lifecycle gathers). Gates: `test_layout_capacity`, `test_root_parent_is_sentinel`, `test_no_negative_gather_index`. (§2)
+621:3. **Empty/zero-mass bodies are finite:** `det_safe` + `body_valid` mask ⇒ zero accel, no `1/0`, no `0·∞`. Gate: `test_solve.py::empty_zero_mass_finite`. (§3)
+622-4. **RNG:** one per-world on-device `next_eid[W]`; key includes `world_id`; Philox mul-hi via 16-bit decomposition (no int64 overflow); Box–Muller uniforms in `(0,1]`; rejection exhaustion via `REKEY_CONT`; event_kind enum includes `PARAM_MUT`/`STRUCT_TOGGLE`. Gates: `test_prf_reference_vectors`, `test_cross_world_disjoint`, `test_boxmuller_no_log0`, `test_rejection_exhaustion`. (§4)
+623-5. **Single source of truth:** `energy`/`struct_N` stored only in ColonyState; biomass totals derived; `SimulationSnapshot` deduplicated and forcing-complete; `safetensors>=0.4.3` pinned. Gates: `test_single_source_of_truth`, `test_snapshot_roundtrip_bit_identical`, `test_colonystate_alone_is_insufficient`. (§5)
+624:6. **One energy equation:** `p_in = tReact·U + pWake + tFin·U_cl + pFin`; the only KE gate is `R_step` (with `½vᵀΔMv`, `J_c`, `J_reg`); structural energy is derived and counted once. Gates: `test_energy_uses_Ucl_everywhere`, `test_no_naive_ke_gate`, `test_struct_energy_counted_once`, `discrete_balance_1e5`. (§6)
+625:7. **Regularization ledgered:** conservation gates use the exact solve; stable `disc=√((M00−M22)²+4M02²)`, `lam_min=det/lam_max` (no cancellation, `tr=0` masked upstream); `J_reg` in the momentum + energy ledgers; never on the gain0 path. Gates: `test_reg_momentum_closes`, `test_reg_energy_ledgered`, `test_stable_kappa_no_cancellation`, `donor_conformance`. (§7)
+626:8. **Independent gain1 fixtures:** closed-form ellipsoid mass `ρ(4/3)πabc`, Lamb `k=α0/(2−α0)`, analytic single-step Lighthill/Garrick forces and 2×2 KKT `dv`; gain0 from an untouched donor; no patched donor. Gates: `test_oracle_gain1_analytic`, `test_gain1_fixtures_donor_free`, `test_no_patched_donor`. (§8)
+627-9. **Throughput:** S0 floor `F_loco_S0 ≈ 9.0e7` (double-count removed); G-E2E on a stubbed-feeding whole tick at S2→S3, re-confirmed post-S3; no flattened prototype; hardware pins parameterized; churn/static-capture/conservation risks ACTIVE until their Rev-3 gates pass. Gates: `test_headroom_no_double_count`, `test_bench_no_flattened_build`, `test_risk_register_no_premature_retire`. (§9)
+628-10. **Import firewall:** `core.snapshot` enumerated as a core internal; S7 reads snapshots only via `core.contracts.open_snapshot`. Gates: `test_every_private_module_is_firewalled`, `test_s7_snapshot_via_contracts_only`, strengthened G-SCAF-2 probe. (§10)
+629-
+630-When these ten gates are green (and the Rev-2 gates they extend remain green), the S0 spec is internally consistent and S0 code may begin. Rev-2 + Rev-3 = the final S0 spec.
+
+exec
+/usr/bin/zsh -lc "rg --files | rg 'gain1|fixture|oracle|SpikeSwim|spikeswim|swim' | head -200 && rg -n \"H1|gain1|gain_1|0\\.50|m_t\" tools tests fixtures 2>/dev/null" in /mnt/c/Users/cddal/SirRobin
+ exited 2 in 258ms:
+exec
+/usr/bin/zsh -lc "python -c 'import numpy as np; a,b,c=.5,.05,.05
+for n in [32,64,128,256,512,1024]:
+ x,w=np.polynomial.legendre.leggauss(n);t=(x+1)/2;w=w/2;lam=(1-t)/t;D=np.sqrt((a*a+lam)*(b*b+lam)*(c*c+lam)); vals=[np.sum(w*(a*b*c/((d*d+lam)*D))/t**2) for d in (a,b,c)];print(n,vals,sum(vals))'" in /mnt/c/Users/cddal/SirRobin
+ exited 1 in 174ms:
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import numpy as np; a,b,c=.5,.05,.05
+    ^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'numpy'
+
+codex
+Overall verdict: **NO-GO for the production SpikeSwim solver.** The dimensional split and energy-gate cleanup are substantially fixed, but the eager solver still generates non-finite values for `M=0`, and the gain1 fixture is still only promised—not committed.
+
+## Round-4 blocker disposition
+
+| Item | Status | Reason |
+|---|---|---|
+| 1. Gate (b) = `R_step`; force identities = (a) | **RESOLVED** | The acceptance table assigns the force-law closures to (a) and only `R_step` to (b); §§5.1–5.2 preserve that split ([S0 spec:15](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:15), [S0 spec:142](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:142), [S0 spec:155](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:155)). |
+| 2. Executable solver | **PARTIAL / STILL BLOCKING** | The single predicate, sign, and x/z-vs-y split are corrected, but the supposedly safe eager regularized solve is `0/0` for `M=0` ([S0 spec:90](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:90), [S0 spec:98](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:98)). |
+| 3. Literal gain1 inputs and expected fixture values | **STILL-BROKEN** | `m_t` still contains `(...)`, other consumed scalars are merely promised, and no expected numeric outputs are given ([S0 spec:187](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:187), [S0 spec:193](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:193)). No `tools/gain1_oracle.py` or gain1 fixture currently exists in the repository. |
+| 4. Gain1 `1/t²` Jacobian | **RESOLVED in the math** | The transformed integral now contains the correct `1/t²` factor ([S0 spec:199](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:199), [S0 spec:204](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:204)). |
+| 5. Non-OOM authorization | **RESOLVED** | At least one real cell is mandatory and all-OOM explicitly fails ([S0 spec:220](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:220), [S0 spec:223](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:223)). |
+| `max(abs(p_in), ε)` | **RESOLVED** | The normalization now uses the absolute magnitude and explains why signed `p_in` requires it ([S0 spec:150](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:150)). |
+
+## Solver: blocking findings
+
+1. **Empty bodies still produce eager NaNs.**
+
+For `M00=M02=M22=0`:
+
+```text
+tr = 0
+reg = EPS_SPD * tr = 0
+det_reg = (0+0)(0+0)-0 = 0
+Δv_reg = (0/0, 0/0) = NaN
+```
+
+That happens before the outer `torch.where`. It directly contradicts “finite on every body” and “even for `M=0`, `det_reg=reg² > 0`” ([S0 spec:82](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:82), [S0 spec:97](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:97), [S0 spec:108](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:108)).
+
+The outer selection may hide the output, but it does not make the eagerly evaluated branch finite.
+
+2. **`det_safe` does not make the eigensystem finite at `M=0`.**
+
+At `M=0`, `lam_max=0` and `lam_min=DET_FLOOR/0=∞` ([S0 spec:70](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:70), [S0 spec:71](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:71)). `kappa` happens to evaluate as `0/∞ = 0`, but `lam_min` is non-finite and the invalid body is misleadingly “well-conditioned” numerically. The claimed eager-finiteness guarantee is false.
+
+3. **`κ` does not imply `det_safe == det`.**
+
+The assertion at [S0 spec:106](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:106) is mathematically invalid because `κ` is scale-invariant while `DET_FLOOR` is absolute. For `M=αI`, `κ=1` for every positive `α`, but sufficiently small `α` gives `det=α²<DET_FLOOR`. The body selects `EXACT` while solving with the altered denominator `DET_FLOOR`, so `MΔv=P` need not close.
+
+4. **`det_reg` is not proven safe in f32.**
+
+Even for valid bodies, computing
+
+```python
+(M00+reg)*(M22+reg) - M02*M02
+```
+
+retains a cancellation path. “SPD in real arithmetic” does not prove that the computed f32 determinant is bounded away from zero. `EPS_SPD` and relevant input bounds are also not pinned in this document ([S0 spec:90](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:90), [S0 spec:98](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:98)).
+
+5. **The corrected portions are correct.**
+
+The dispatch uses only `κ>KAPPA_MAX` ([S0 spec:76](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:76), [S0 spec:86](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:86)). The regularization sign is right:
+
+```text
+(M+rI)Δv=P  ⇒  MΔv=P-rΔv=P+J_reg
+J_reg=-rΔv
+```
+
+And the 2-D equation is now cleanly separated from vertical `J_c` ([S0 spec:113](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:113), [S0 spec:118](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:118), [S0 spec:120](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:120)).
+
+## Energy
+
+The two gate meanings are now distinct and compatible:
+
+- Gate (a): two force-law algebraic closures.
+- Gate (b): the discrete `R_step` identity.
+
+The `R_step` algebra, including the `½v_nᵀΔMv_n` term and regularization work, is coherent ([S0 spec:155](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:155)).
+
+S0’s exact int64 equality contains only fake-reservoir mass quanta. KE remains floating-point, and no float is inserted into the int64 `close_books()` equality ([S0 spec:40](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:40), [S0 spec:52](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:52), [S0 spec:173](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:173)).
+
+Minor contradiction: §1 specifies both f64 and f32 `R_step` arms, while §§5 and 5.3 call the treatment “entirely f32” and “f32, and that is the whole story” ([S0 spec:20](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:20), [S0 spec:137](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:137), [S0 spec:173](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:173)). Clarify that f32 is the production representation and f64 is a validation/reference arm.
+
+## Gain1 oracle
+
+- The Jacobian is correct.
+- The endpoint reasoning is correct: the Lamb integrand behaves as `g(λ)=O(λ^-5/2)`, hence after substitution `g/t²=O(t^1/2)`, which is finite and integrable as `t→0`.
+- Independence is not yet real: the generator and fixture are absent. Moreover, the named AST/import gate only says “donor-free”; the spec should explicitly make importing `torch` or the production package a test failure ([S0 spec:210](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:210)).
+- Thirty-two-point accuracy is asserted, not demonstrated. The frozen fixture should include a convergence comparison against a higher-accuracy independent evaluation.
+
+## Deferral boundary
+
+Section 9 is correctly drawn. The energy economy, feeding/reserve semantics, `Bm`, cross-ledger transactions, mutation RNG, and S2 feeding-stub model do not gate a standalone frozen-heading locomotion kernel ([S0 spec:239](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:239)). Nothing listed there needs to move into S0.
+
+## Minimal remaining S0 changes
+
+1. Make every eager path genuinely finite:
+
+   - Guard `lam_max` and the `kappa` denominator.
+   - Give non-selected solve branches a literal safe denominator, e.g. `where(EXACT, det, 1)` and `where(REGULARIZED, det_reg, 1)`.
+   - Do not let an absolute `DET_FLOOR` alter an `EXACT` solve.
+   - Compute or guard `det_reg` so its f32 denominator cannot become zero/non-finite.
+   - Pin `DET_FLOOR`, `EPS_SPD`, `KAPPA_MAX`, and numerical input bounds.
+
+2. Commit `tools/gain1_oracle.py` and a fixture containing every input and expected output as literal numbers—no ellipses or future-tense promises.
+
+3. Strengthen oracle independence to reject `torch`, production-kernel, and donor imports.
+
+4. Clarify f32 production versus f64 validation wording.
+
+Until items 1–2 land, the spec is not internally coherent enough to authorize building the production SpikeSwim kernel. Scaffold/layout work can proceed independently.
+tokens used
+36,694
+Overall verdict: **NO-GO for the production SpikeSwim solver.** The dimensional split and energy-gate cleanup are substantially fixed, but the eager solver still generates non-finite values for `M=0`, and the gain1 fixture is still only promised—not committed.
+
+## Round-4 blocker disposition
+
+| Item | Status | Reason |
+|---|---|---|
+| 1. Gate (b) = `R_step`; force identities = (a) | **RESOLVED** | The acceptance table assigns the force-law closures to (a) and only `R_step` to (b); §§5.1–5.2 preserve that split ([S0 spec:15](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:15), [S0 spec:142](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:142), [S0 spec:155](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:155)). |
+| 2. Executable solver | **PARTIAL / STILL BLOCKING** | The single predicate, sign, and x/z-vs-y split are corrected, but the supposedly safe eager regularized solve is `0/0` for `M=0` ([S0 spec:90](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:90), [S0 spec:98](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:98)). |
+| 3. Literal gain1 inputs and expected fixture values | **STILL-BROKEN** | `m_t` still contains `(...)`, other consumed scalars are merely promised, and no expected numeric outputs are given ([S0 spec:187](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:187), [S0 spec:193](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:193)). No `tools/gain1_oracle.py` or gain1 fixture currently exists in the repository. |
+| 4. Gain1 `1/t²` Jacobian | **RESOLVED in the math** | The transformed integral now contains the correct `1/t²` factor ([S0 spec:199](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:199), [S0 spec:204](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:204)). |
+| 5. Non-OOM authorization | **RESOLVED** | At least one real cell is mandatory and all-OOM explicitly fails ([S0 spec:220](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:220), [S0 spec:223](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:223)). |
+| `max(abs(p_in), ε)` | **RESOLVED** | The normalization now uses the absolute magnitude and explains why signed `p_in` requires it ([S0 spec:150](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:150)). |
+
+## Solver: blocking findings
+
+1. **Empty bodies still produce eager NaNs.**
+
+For `M00=M02=M22=0`:
+
+```text
+tr = 0
+reg = EPS_SPD * tr = 0
+det_reg = (0+0)(0+0)-0 = 0
+Δv_reg = (0/0, 0/0) = NaN
+```
+
+That happens before the outer `torch.where`. It directly contradicts “finite on every body” and “even for `M=0`, `det_reg=reg² > 0`” ([S0 spec:82](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:82), [S0 spec:97](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:97), [S0 spec:108](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:108)).
+
+The outer selection may hide the output, but it does not make the eagerly evaluated branch finite.
+
+2. **`det_safe` does not make the eigensystem finite at `M=0`.**
+
+At `M=0`, `lam_max=0` and `lam_min=DET_FLOOR/0=∞` ([S0 spec:70](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:70), [S0 spec:71](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:71)). `kappa` happens to evaluate as `0/∞ = 0`, but `lam_min` is non-finite and the invalid body is misleadingly “well-conditioned” numerically. The claimed eager-finiteness guarantee is false.
+
+3. **`κ` does not imply `det_safe == det`.**
+
+The assertion at [S0 spec:106](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:106) is mathematically invalid because `κ` is scale-invariant while `DET_FLOOR` is absolute. For `M=αI`, `κ=1` for every positive `α`, but sufficiently small `α` gives `det=α²<DET_FLOOR`. The body selects `EXACT` while solving with the altered denominator `DET_FLOOR`, so `MΔv=P` need not close.
+
+4. **`det_reg` is not proven safe in f32.**
+
+Even for valid bodies, computing
+
+```python
+(M00+reg)*(M22+reg) - M02*M02
+```
+
+retains a cancellation path. “SPD in real arithmetic” does not prove that the computed f32 determinant is bounded away from zero. `EPS_SPD` and relevant input bounds are also not pinned in this document ([S0 spec:90](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:90), [S0 spec:98](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:98)).
+
+5. **The corrected portions are correct.**
+
+The dispatch uses only `κ>KAPPA_MAX` ([S0 spec:76](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:76), [S0 spec:86](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:86)). The regularization sign is right:
+
+```text
+(M+rI)Δv=P  ⇒  MΔv=P-rΔv=P+J_reg
+J_reg=-rΔv
+```
+
+And the 2-D equation is now cleanly separated from vertical `J_c` ([S0 spec:113](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:113), [S0 spec:118](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:118), [S0 spec:120](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:120)).
+
+## Energy
+
+The two gate meanings are now distinct and compatible:
+
+- Gate (a): two force-law algebraic closures.
+- Gate (b): the discrete `R_step` identity.
+
+The `R_step` algebra, including the `½v_nᵀΔMv_n` term and regularization work, is coherent ([S0 spec:155](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:155)).
+
+S0’s exact int64 equality contains only fake-reservoir mass quanta. KE remains floating-point, and no float is inserted into the int64 `close_books()` equality ([S0 spec:40](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:40), [S0 spec:52](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:52), [S0 spec:173](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:173)).
+
+Minor contradiction: §1 specifies both f64 and f32 `R_step` arms, while §§5 and 5.3 call the treatment “entirely f32” and “f32, and that is the whole story” ([S0 spec:20](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:20), [S0 spec:137](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:137), [S0 spec:173](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:173)). Clarify that f32 is the production representation and f64 is a validation/reference arm.
+
+## Gain1 oracle
+
+- The Jacobian is correct.
+- The endpoint reasoning is correct: the Lamb integrand behaves as `g(λ)=O(λ^-5/2)`, hence after substitution `g/t²=O(t^1/2)`, which is finite and integrable as `t→0`.
+- Independence is not yet real: the generator and fixture are absent. Moreover, the named AST/import gate only says “donor-free”; the spec should explicitly make importing `torch` or the production package a test failure ([S0 spec:210](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:210)).
+- Thirty-two-point accuracy is asserted, not demonstrated. The frozen fixture should include a convergence comparison against a higher-accuracy independent evaluation.
+
+## Deferral boundary
+
+Section 9 is correctly drawn. The energy economy, feeding/reserve semantics, `Bm`, cross-ledger transactions, mutation RNG, and S2 feeding-stub model do not gate a standalone frozen-heading locomotion kernel ([S0 spec:239](/mnt/c/Users/cddal/SirRobin/docs/superpowers/plans/2026-07-12-sirrobin-S0-kernel-spec.md:239)). Nothing listed there needs to move into S0.
+
+## Minimal remaining S0 changes
+
+1. Make every eager path genuinely finite:
+
+   - Guard `lam_max` and the `kappa` denominator.
+   - Give non-selected solve branches a literal safe denominator, e.g. `where(EXACT, det, 1)` and `where(REGULARIZED, det_reg, 1)`.
+   - Do not let an absolute `DET_FLOOR` alter an `EXACT` solve.
+   - Compute or guard `det_reg` so its f32 denominator cannot become zero/non-finite.
+   - Pin `DET_FLOOR`, `EPS_SPD`, `KAPPA_MAX`, and numerical input bounds.
+
+2. Commit `tools/gain1_oracle.py` and a fixture containing every input and expected output as literal numbers—no ellipses or future-tense promises.
+
+3. Strengthen oracle independence to reject `torch`, production-kernel, and donor imports.
+
+4. Clarify f32 production versus f64 validation wording.
+
+Until items 1–2 land, the spec is not internally coherent enough to authorize building the production SpikeSwim kernel. Scaffold/layout work can proceed independently.
+=== EXIT=0 ===
