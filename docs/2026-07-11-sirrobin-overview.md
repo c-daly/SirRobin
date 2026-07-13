@@ -2,6 +2,12 @@
 
 *A plain description of the project's intent at this stage (2026-07-11). A draft to refine, not a spec.*
 
+> **2026-07-13 disposition.** This vision still stands, but current execution is governed by
+> `docs/2026-07-13-sirrobin-game-prototype-recovery-synthesis.md` and the living-loop recovery plan. In this
+> document, “one representation” means one authoritative live state, not a ban on rebuildable derived caches or
+> response models. Full articulated physics is the causal reference rather than necessarily every organism's
+> ecological substep. The complete simulation remains headless; Unity may observe it but never own it.
+
 ## In one breath
 
 SirRobin is a small, faithful, continuously-simulated ocean world in which life evolves from
@@ -50,8 +56,9 @@ carry nutrients and heat and larvae — making blooms and deserts, gyres and fro
 patterns that connect or isolate populations. Clouds shade; storms mix and disturb. It all
 interlocks: currents bend around the seafloor, upwell along ridges, and carry the vent plumes.
 
-The world is continuous — not chopped into cells you can feel — and every distinct thing has exactly
-one representation, never two copies kept in sync. It starts *small, dense, and all-ocean* — a
+The world is continuous — not chopped into cells you can feel — and every live quantity has exactly
+one authority, never two mutable copies kept in sync. Rebuildable derived caches and observer views are
+allowed. It starts *small, dense, and all-ocean* — a
 wrap-around patch of sea with no edges — because density, not size, is what makes life interact
 richly, and a small world runs fast enough to actually tune. It grows only as the life inside it
 asks for more.
@@ -76,23 +83,25 @@ land where a swimmer becomes a walker. The vehicle is built to *reach* that endp
 The last attempt drowned in complexity, because ideas kept spawning hidden sub-projects that got
 bulldozed in place. This one is held together by a few hard rules:
 
-- **One canonical representation per thing** — no duplicated state, no glue keeping copies agreed.
+- **One authoritative state per thing** — no duplicated mutable truth or glue keeping copies agreed;
+  rebuildable derived responses, snapshots, and views are fine.
 - **Clean abstraction boundaries** — each subsystem is asked for *what it provides*, never *how it
   works*, so any piece can start trivial and grow arbitrarily faithful later without touching the rest.
-- **Close the books before adding breadth** — one conserved loop working and tested before the next
-  layer exists.
+- **Build a vertical living loop** — close the books across movement, feeding, lifecycle, recycling, and
+  observation, then deepen the bottleneck that the running world exposes.
 - **Start simple, grow on demand** — the world's richness tracks what the biology actually needs and
   never runs ahead of it.
-- **One vectorized substrate** (GPU-capable) so the faithful physics can run for the whole population
-  at once — which is exactly what dissolves the compromise that broke the last build.
+- **One vectorized substrate** (GPU-capable) with the full body physics as its causal reference. A cheaper
+  per-genotype response may run the whole ecological population when it preserves the physical differences
+  selection actually uses.
 
 ## Where it goes
 
-Depth-first, roughly in this order: a deterministic core that closes its books → a conserved
-single-nutrient economy → one canonical body swimming by real physics → feeding, metabolism, and
-reproduction on conserved energy → predation between real bodies → speciation → currents and weather
-→ a way to watch it → embodiment for the agent → and, last and hardest, land, and the fish that grew
-legs.
+The current recovery joins the existing conserved nutrient cycle and canonical physical body into the thinnest
+headless living loop: imperfect movement → local feeding → maintenance → paid reproduction → death → recycling,
+with replay/observation alongside it. Once that loop is visible and measured at useful population scale, add
+variation, then let its actual bottlenecks justify predation, mating/speciation, richer transport, embodiment,
+and, last and hardest, land and the fish that grew legs.
 
 That's what I'm trying to do: a small ocean with honest causes, life that earns its own complexity,
 and a world faithful enough to eventually learn in.

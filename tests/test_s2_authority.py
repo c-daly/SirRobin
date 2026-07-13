@@ -6,15 +6,19 @@ from sirrobin.physics.contracts import LiveState
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_active_docs_route_s2_to_recorded_no_go():
-    required = {
-        "CLAUDE.md": "S2 is implemented but records NO-GO",
-        "docs/2026-07-11-sirrobin-design-document.md": "S2 is implemented but records NO-GO",
-        "docs/2026-07-12-sirrobin-developer-reference.md": "S2 is implemented but records NO-GO",
-    }
-    for relative, phrase in required.items():
-        text = " ".join((ROOT / relative).read_text(encoding="utf-8").replace(">", "").split())
-        assert phrase in text
+def test_active_docs_route_to_living_loop_recovery_authority():
+    authority_name = "2026-07-13-sirrobin-living-loop-recovery-implementation-plan.md"
+    authority = ROOT / "docs" / "superpowers" / "plans" / authority_name
+    assert authority.is_file()
+    for relative in (
+        "CLAUDE.md",
+        "docs/2026-07-11-sirrobin-design-document.md",
+        "docs/2026-07-12-sirrobin-developer-reference.md",
+    ):
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        assert authority_name in text
+
+    # The authority changed; the frozen S2 result remains historical evidence.
     assert (ROOT / "docs/superpowers/reports/2026-07-12-sirrobin-S2-decision-report.md").is_file()
 
 

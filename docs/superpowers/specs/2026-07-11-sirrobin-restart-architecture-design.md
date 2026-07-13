@@ -13,6 +13,15 @@ against the actual donor source `…/game prototype/Assets/ProceduralWorld/Scrip
 > throughput framing. Public S2 state is ENU/FLU; S0 remains donor-native behind an adapter; core constructs
 > physics-owned fluid samples from sibling fields; and S2 work is diagnostic until S3 creates real reservoirs.
 
+> **2026-07-13 recovery amendment.** The recovery synthesis and
+> `../plans/2026-07-13-sirrobin-living-loop-recovery-implementation-plan.md` supersede this draft's universal
+> full-articulated-population premise, S0–S9 sequencing, controller veto, delayed observer, and language-level
+> dismissal of C#. The full solver remains the physical reference; one rebuildable per-genotype response may
+> drive a uniform ecological hot loop. The complete authority remains headless, Game Prototype's extracted C#
+> is an executable donor, and Unity is an optional observer. One authoritative live state is required; one-way
+> derived caches/snapshots are allowed. Historical S2 F12 non-settlement is phenotype evidence, not a recovery
+> blocker.
+
 ---
 
 ## 1. North star & principles (recap — see brief for full)
@@ -179,15 +188,17 @@ drift breaches the gate (monotonic not oscillating); F7 churn compaction swamps 
 Telemetry-first: dump a parquet/jsonl of every gate metric + profiler attribution; no assertion from
 code inspection.
 
-## 7. Slice roadmap (revised)
+## 7. Historical slice roadmap (superseded by the 2026-07-13 recovery plan)
 
 - **S0 — SpikeSwim** (complete): original 90M gate NO-GO; population-grounded 5k/10k gate GO.
 - **S1 — Conserved single-nutrient economy** (keystone): closed loop (Liebig×Monod drawdown,
   bacterial remineralization BGE split, Martin profile, mixing). *Books must close* to tolerance;
   blooms/deserts emerge from the loop. **Complete; GO.**
-- **S2 — One canonical body + live locomotion for every creature (implemented; NO-GO on F12):** fixed-capacity
+- **S2 — One canonical body + live locomotion for every creature (implemented; mechanics reusable; frozen
+  exact-settlement F12 failed):** fixed-capacity
   innovation-marked genotype → immutable `DevelopedBody` → ENU/FLU additive hydrodynamics with real
-  angular-momentum yaw. Re-measure H1/H2 at 5,000 and 10,000; no stat vector and no metabolic debit.
+  angular-momentum yaw; no stat vector and no metabolic debit. The F12 phenotype result does not block the
+  recovery living loop.
 - **S3 — Feeding/metabolism/reproduction on conserved energy** (Holling-II + assimilation loss →
   detritus; Kleiber; real construction cost).
 - **S4 — Predation as a staged contest between bodies** (find→close→seize→consume; conserved; no
@@ -201,13 +212,15 @@ code inspection.
 
 ## 8. Salvage as oracle (revised)
 
-The C# crown jewels are **re-ported to torch**, not "called live." The C# donor is demoted to an
-**offline oracle / fixture generator** (a tiny headless console harness, or the existing
+The initial Python path re-ports the C# crown jewels to torch rather than calling Unity live. The C# donor is an
+**executable headless donor/oracle** (a tiny console harness, or the existing
 `ReconstructForTest`/`LambKForTest`/`CoastTest`/`MomentumLedger` seams — SwimEval is Unity-light:
-only `Vector3`/`Quaternion`/`Mathf`). Conservation-invariant tests move from C# BitConverter/FNV
+only `Vector3`/`Quaternion`/`Mathf`). It remains an executable headless reference, not a discarded language.
+Conservation-invariant tests move from C# BitConverter/FNV
 goldens to **pytest + tolerance invariants**. Frozen conformance fixtures (LambK grid, single-step
 forces, 8 s aggregates across H1/H2 genomes) guard the port. The **validated equations + recorded
-oracle values** are the durable salvage; the C# text does not run in SirRobin.
+oracle values and executable mechanisms** are durable salvage; whether a mechanism runs in Python or headless C#
+is an implementation decision subordinate to one scientific authority and measured whole-world cost.
 
 ## 9. Risks & mitigations
 

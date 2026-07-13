@@ -7,10 +7,22 @@
 > S0. The consolidated S1 conserved-nutrient plan governs S1 and supersedes older float-ledger, reservoir,
 > energy, parcel-timing, and package-layering prose below. S0 is complete: the original 1,000/90M gate remains
 > NO-GO and the pre-registered 5,000/10,000 population gate is GO. S1 is also implemented and records GO in
-> `docs/superpowers/reports/2026-07-12-sirrobin-S1-decision-report.md`; S2 is implemented but records NO-GO on
-> controller falsifier F12, despite green canonical mechanics and CUDA throughput.
+> `docs/superpowers/reports/2026-07-12-sirrobin-S1-decision-report.md`; S2 is implemented and its frozen run
+> records an exact-heading-settlement F12 failure despite green canonical mechanics and CUDA throughput.
 > The S2 canonical-body/live-locomotion plan governs S2 and supersedes older coordinate, tail-direction,
 > metabolic-debit, action-validation, capacity, and throughput statements in this document.
+
+> **2026-07-13 recovery amendment.** The current position and execution authority are
+> `docs/2026-07-13-sirrobin-game-prototype-recovery-synthesis.md` and
+> `docs/superpowers/plans/2026-07-13-sirrobin-living-loop-recovery-implementation-plan.md`. They supersede this
+> document's S0–S9 ordering, universal full-articulated-hot-loop premise, component-perfect gate progression,
+> delayed-observer timing, C#-as-superseded language, and F12-as-roadmap-veto. The complete simulation remains
+> headless; Unity is an optional observer. The full articulated solver remains the causal reference, while a
+> rebuildable per-genotype physics-derived response may drive one uniform ecological hot path. “Single
+> representation” means one authoritative live state; one-way rebuildable derived models, caches, snapshots, and
+> render views are allowed. S2's settlement failure remains historical phenotype evidence, not a blocker on the
+> conserved living loop. Detailed equations and interfaces below remain design input where they do not conflict
+> with that recovery authority or current code.
 
 ---
 
@@ -1284,7 +1296,14 @@ The C# donor is **not called live**. Two disposition classes:
 - The C# `SwimEval` donor becomes a tiny headless console harness (or the existing `ReconstructForTest`/`LambKForTest`/`CoastTest`/`MomentumLedger` seams). It emits **frozen fixtures**: a LambK grid, single-step force terms, 8 s episode aggregates across H1/H2 genomes.
 - Conservation-invariant tests move from C# BitConverter/FNV goldens to **pytest + tolerance invariants**.
 
-**Explicitly superseded (do not salvage as architecture):** C#/Unity as host; the data-far/physics-near LOD proxy; the dual genome (`eff[]`); static non-conserving Perlin fields; byte-identity-as-gate; the 3,067-line `OceanColony` god-class; asexual clone-and-mutate + post-hoc cosine "species." The durable salvage is **validated equations + recorded oracle values**; the C# *text* does not run in SirRobin. *(The prior build's 74-commit master-sequence — small individually-verifiable commits, runtime-verify every step — is retained only as **process** discipline.)*
+**Explicitly superseded (do not salvage as architecture):** Unity/`MonoBehaviour` as simulation host; the
+data-far/physics-near LOD proxy; the dual genome (`eff[]`); static non-conserving Perlin fields;
+byte-identity-as-gate; the 3,067-line `OceanColony` god-class; asexual clone-and-mutate + post-hoc cosine
+"species." C# itself is not superseded: extracted headless C# mechanisms remain executable donors and may be
+reused when they fit the one-authority architecture. The durable salvage includes **validated equations,
+executable mechanisms, recorded oracle values, and whole-world behavioral lessons**. *(The prior build's
+74-commit master-sequence — small individually-verifiable commits, runtime-verify every step — is retained only
+as **process** discipline.)*
 
 ---
 
