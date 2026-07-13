@@ -1,0 +1,182 @@
+{
+  "anchors": [
+    {
+      "classification": "numerical schema",
+      "source": "S1 authority \u00a71.1",
+      "symbol": "q_mass",
+      "unit": "mol nutrient quantum-1",
+      "valid_range": [
+        1e-12,
+        1e-06
+      ],
+      "value": 1e-09
+    },
+    {
+      "classification": "validation anchor",
+      "source": "https://fisherybulletin.nmfs.noaa.gov/sites/default/files/pdf-content/1972/704/eppley.pdf",
+      "symbol": "mu_max",
+      "unit": "s-1",
+      "valid_range": [
+        0.0,
+        2.3148148148148147e-05
+      ],
+      "value": 5.787037037037037e-06
+    },
+    {
+      "classification": "measured species anchor",
+      "source": "Dunaliella salina K_mu=28 nmol P L-1; https://repository.lsu.edu/enviro_sciences_pubs/299/",
+      "symbol": "K_N",
+      "unit": "mol m-3",
+      "valid_range": [
+        1e-07,
+        0.01
+      ],
+      "value": 2.8e-05
+    },
+    {
+      "classification": "validation anchor within observed range",
+      "source": "https://doi.org/10.1146/annurev.ecolsys.29.1.503",
+      "symbol": "BGE",
+      "unit": "1",
+      "valid_range": [
+        0.0,
+        1.0
+      ],
+      "value": 0.2
+    },
+    {
+      "classification": "measured composite fit",
+      "source": "https://doi.org/10.1016/0198-0149(87)90086-0",
+      "symbol": "martin_b",
+      "unit": "1",
+      "valid_range": [
+        0.0,
+        2.0
+      ],
+      "value": 0.858
+    },
+    {
+      "classification": "validation transport choice",
+      "source": "Ledwell et al. measured slow open-ocean mixing; https://doi.org/10.1038/364701a0",
+      "symbol": "Kz",
+      "unit": "m2 s-1",
+      "valid_range": [
+        1e-06,
+        0.01
+      ],
+      "value": 0.0001
+    },
+    {
+      "classification": "validation transport choice",
+      "source": "S1 numerical validation condition; not inferred as a universal particle speed",
+      "symbol": "w_sink",
+      "unit": "m s-1",
+      "valid_range": [
+        0.0,
+        0.0023148148148148147
+      ],
+      "value": 0.00011574074074074075
+    },
+    {
+      "classification": "validation loss anchor",
+      "source": "Master design documented anchor; frozen before dynamics",
+      "symbol": "m_resp",
+      "unit": "s-1",
+      "valid_range": [
+        0.0,
+        1.1574074074074073e-05
+      ],
+      "value": 1.1574074074074074e-06
+    },
+    {
+      "classification": "validation loss anchor",
+      "source": "Master design documented anchor; frozen before dynamics",
+      "symbol": "d0",
+      "unit": "s-1",
+      "valid_range": [
+        0.0,
+        1.1574074074074073e-05
+      ],
+      "value": 5.787037037037037e-07
+    },
+    {
+      "classification": "non-authorizing mechanism probe",
+      "source": "Must be removed in the hard anti-cap authorization ablation",
+      "symbol": "d_dd",
+      "unit": "m3 mol-1 s-1",
+      "valid_range": [
+        0.0,
+        0.05787037037037037
+      ],
+      "value": 0.005787037037037037
+    },
+    {
+      "classification": "reaction stability domain",
+      "source": "Frozen numerical validity bound, not a carrying capacity or state clamp",
+      "symbol": "C_Bp_validation_max",
+      "unit": "mol m-3",
+      "valid_range": [
+        1e-06,
+        1.0
+      ],
+      "value": 0.002
+    },
+    {
+      "classification": "provisional closure anchor",
+      "source": "Required temporary turnover while S1 has no microbivores",
+      "symbol": "m_microbe",
+      "unit": "s-1",
+      "valid_range": [
+        0.0,
+        1.1574074074074073e-05
+      ],
+      "value": 5.787037037037037e-07
+    },
+    {
+      "classification": "closed-bottom trap guard",
+      "source": "200-day maximum residence time, frozen validation choice",
+      "symbol": "k_remin_floor",
+      "unit": "s-1",
+      "valid_range": [
+        1.1574074074074074e-09,
+        1.1574074074074073e-05
+      ],
+      "value": 5.787037037037037e-08
+    }
+  ],
+  "config": {
+    "bge": 0.2,
+    "density_mortality_m3_mol_s": 0.005787037037037037,
+    "dt_eco_s": 8640.0,
+    "gx": 64,
+    "gy": 64,
+    "gz": 32,
+    "i0_w_m2": 200.0,
+    "k_i_w_m2": 20.0,
+    "k_light_m_inv": 0.04,
+    "k_n_mol_m3": 2.8e-05,
+    "kz_bm_m2_s": 0.0001,
+    "kz_bp_m2_s": 0.0001,
+    "kz_nd_m2_s": 0.0001,
+    "lx_m": 640.0,
+    "ly_m": 640.0,
+    "lz_m": 160.0,
+    "martin_b": 0.858,
+    "martin_reference_depth_m": 100.0,
+    "max_inventory_q": 1000000000000000,
+    "max_validation_biomass_mol_m3": 0.002,
+    "microbial_turnover_s": 5.787037037037037e-07,
+    "mu_max_s": 5.787037037037037e-06,
+    "producer_maintenance_s": 1.1574074074074074e-06,
+    "producer_mortality_s": 5.787037037037037e-07,
+    "q_mass_mol": 1e-09,
+    "remin_floor_s": 5.787037037037037e-08,
+    "schema": "sirrobin.economy.config.v1",
+    "sinking_speed_m_s": 0.00011574074074074075,
+    "worlds": 1
+  },
+  "config_hash": "7ba1174c3afb5d15753e6aff45d2ba2f87fad5e740aa4ab540cb72f7d206036a",
+  "frozen_before_dynamics": true,
+  "generator_sha256": "c14de50b41fe2aea6400abd3484ebcf462508cf0eba5a20f4587a812a80d29f1",
+  "schema": "sirrobin.economy.anchor-manifest.v1"
+}

@@ -12,8 +12,10 @@ purpose is a grounding substrate for an embodied agent (Sophia), deferred until 
 - `docs/superpowers/specs/2026-07-11-sirrobin-restart-architecture-design.md` and `…-genome-encoding-design.md`.
 - The file-based memory (`…/.claude/projects/…/memory/`, auto-loaded via `MEMORY.md`) — the running decision record.
 
-**Current state:** design phase — no simulation code yet. The first build is **S0 / "SpikeSwim"**
-(verify vectorized faithful physics on GPU *before* betting the architecture on it). Build depth-first from there.
+**Current state:** **S0 / "SpikeSwim" is implemented and verified.** The original 1,000-creature/90M Gate E
+remains a recorded NO-GO; the subsequently pre-registered population-grounded gate records GO at 5,000 and
+10,000 creatures. **S1 is implemented and records GO** for the exact four-reservoir nutrient cycle; S2 is the
+next execution programme. Build depth-first from there.
 
 ## Environment (this documents decisions that diverge from the global `~/.claude/CLAUDE.md`)
 
@@ -24,8 +26,9 @@ the simulation lives.
 
 - **Determinism:** reproducible-within-seed on a fixed device. **Conservation invariants are the primary
   test gate — NOT byte-identity.** (Byte-identity was the prior build's wrong invariant; it let fidelity
-  ship disabled behind `gain=0` dials.) Precision is a deliberate hybrid: float32 in the hot loop, float64
-  for the conservation ledger and oracle-match.
+  ship disabled behind `gain=0` dials.) Conserved reservoir state is exact int64 fixed-point quanta; float64
+  is used for independent rate/oracle work and float32 for hot mechanical state. There is no float mirror of a
+  conserved reservoir.
 - **PowerShell is 5.1:** when reading/writing files other tools will read, handle UTF-8 explicitly
   (`[System.IO.File]::ReadAllText/WriteAllText` with a UTF-8 encoding) — the default codepage corrupts
   non-ASCII (em-dashes, arrows) into mojibake.

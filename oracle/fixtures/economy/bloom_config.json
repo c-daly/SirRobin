@@ -1,0 +1,16 @@
+{
+  "authorizing_requirements": [
+    "d_dd_zero",
+    "half_timestep_convergence",
+    "exact_books_every_step"
+  ],
+  "config_hash": "7ba1174c3afb5d15753e6aff45d2ba2f87fad5e740aa4ab540cb72f7d206036a",
+  "initial_mol_m3": {
+    "Bd": 0.0,
+    "Bm": 0.0,
+    "Bp": 2e-05,
+    "Nd_deep": 0.002,
+    "Nd_surface": 0.0008
+  },
+  "schema": "sirrobin.economy.bloom-config.v1"
+}

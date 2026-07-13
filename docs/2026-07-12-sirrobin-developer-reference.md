@@ -1,21 +1,29 @@
 # SirRobin — Developer Reference
 
-**Status:** living reference · **Date:** 2026-07-12 · **Audience:** developers building or extending the Core.
+**Status:** **living reference — kept current with the code as it evolves; the single up-to-date
+developer-facing map of the Core** · **Last updated:** 2026-07-12 · **Audience:** developers building or
+extending the Core.
 
 This is the orientation document: the *premise* (what SirRobin is and the invariants you must hold), the
 *architecture* (how the parts fit and where the boundaries are), and the *technical reference* (the
 developer-facing API surfaces). It is a **map, not the territory** — the authoritative sources are:
 
-- **The code** — `src/sirrobin/…` — and **the accepted plan** (`docs/superpowers/plans/2026-07-12-sirrobin-S0-consolidated-implementation-plan.md`) are the **two primary sources for Part III** (the API), cited `file:line` and *plan §*.
+- **The code** — `src/sirrobin/…` — is authoritative for implemented APIs. The consolidated S0 plan, the
+  population-grounded Gate-E revision, and both S0 decision reports are authoritative for S0 acceptance.
+- `docs/superpowers/plans/2026-07-12-sirrobin-S1-conserved-nutrient-implementation-plan.md` is the execution
+  authority for S1 and supersedes older S1 reservoir, energy, parcel, and package-layering prose.
 - `docs/2026-07-11-sirrobin-design-document.md` — the master technical design (cited *design §X*); the source for Parts I–II and the **target** for `[designed]` surfaces not yet coded.
 - `docs/superpowers/specs/2026-07-11-sirrobin-restart-architecture-design.md` and `…-genome-encoding-design.md`.
 - `CLAUDE.md` — the working contract and the nine non-negotiable laws.
 
-> **Reading the status tags.** **S0 / "SpikeSwim" is substantially implemented** — every production module the
-> accepted plan lists exists under `src/sirrobin/`, with a frozen 192-body corpus, both oracle arms, and a test
-> suite. Surfaces are tagged **[S0]** (coded now — Part III cites `file:line`), **[designed]** (specified in the
-> design doc / plan, no code yet, built in a later slice), or **[frontier]** (a research goal, not solved
-> technique). Parts I–II (premise, architecture) hold as written; **Part III is grounded in the actual code.**
+> **Reading the status tags.** **S0 / "SpikeSwim" is complete under the revised population-grounded gate** —
+> every production module the accepted plan lists exists under `src/sirrobin/`, with a frozen 192-body corpus,
+> both oracle arms, tests, and decision reports. The original 1,000-creature/90M Gate E remains a historical
+> NO-GO; the pre-registered 5,000/10,000-creature replacement is GO. **S1 is implemented and records GO.**
+> Surfaces are tagged **[S0]** or **[S1]** (coded now — Part III cites source symbols), **[designed]**
+> (specified in the design doc / plan, no code yet, built in a
+> later slice), or **[frontier]** (a research goal, not solved technique). Parts I–II (premise, architecture)
+> hold as written; **Part III is grounded in the actual code.**
 
 ---
 
@@ -45,7 +53,8 @@ every laundered scalar and arbitrary knob that followed.
 
 The thesis: **step the true per-body physics for the entire population as batched PyTorch tensor operations on
 the GPU.** This dissolves the reason the proxy existed — faithful *and* affordable — and yields the throughput
-deep-time evolution needs (10⁸–10⁹ ticks/run). Because this is the *optimistic* performance premise, it must be
+deep-time evolution needs (10⁸–10⁹ ticks/run). S0 establishes locomotion-component viability at the target
+population; it does not yet establish the complete future tick budget. Because this is an optimistic premise, it must be
 **verified first, by measurement**, before the architecture is bet on it. That verification is S0/SpikeSwim
 (§II.8). *Measure, don't assert* is a law, not a slogan (design §7.1).
 
@@ -98,7 +107,7 @@ Be honest about which is which (design §1.2, §5):
 The Core is **Python / PyTorch**, headless, GPU-capable, cross-platform. One substrate carries the world/physics
 math (torch tensors are numpy-like) and, later, any neural minds (same stack, gains autograd on demand). The hot
 loop runs under `no_grad` on detached tensors — torch as a pure batched array engine, not an autodiff graph
-(design §2.1; memory: population cognition is reactive, not learned, for now).
+(design §2.1 — population cognition is reactive, not learned, for now).
 
 The identical tensor program runs on CPU or CUDA via a `device=` knob; the device choice is made from
 **measured** CPU↔GPU crossover at the real population size, not asserted (design §2.9). GPU's payoff rises with
@@ -107,33 +116,38 @@ RL phase).
 
 ## 2. The entity model: discrete points on continuous fields
 
-Two kinds of thing, one coordinate space (design §2.3; memory — the single-representation resolution):
+Three storage roles share one coordinate space without duplicating authoritative state:
 
-- **Discrete point-entities** — creatures (and, later, plankton/nutrient parcels) — live at continuous float
+- **Discrete point-entities** — creatures and, only if later grazing evidence requires them, resource parcels — live at continuous float
   positions in one continuous coordinate space and share **one spatial hash** for neighbor queries. Diffusion,
   feeding, and predation all reduce to one primitive: *local interactions between nearby entities*. The spatial
   hash quantizes nothing physical; it is invisible to the biology.
-- **Continuous background fields** — the smooth "property-of-space" abiotic fields (temperature, currents,
-  light, the structural/geology field) — are the one genuinely *distinct kind*: a read-only background sampled
-  at a position/time through a one-way interface, with **zero sync** back to the entities. This is permitted by
-  Law 4 because it is not the same quantity stored twice.
+- **Conserved Eulerian reservoir fields** — S1's `Nd_q/Bp_q/Bd_q/Bm_q` int64 tensors — are mutable only through
+  exact economy transactions. Concentration is a derived sample, never a mirrored float field. Consumers receive
+  read-only samples; economy owns the state-changing transfers.
+- **Exogenous/abiotic driver fields** — temperature, currents, structural geology, and similar
+  properties-of-space — are sampled through one-way interfaces. S1 begins only with analytic light and prescribed
+  vertical mixing; geology, currents, temperature, and structural terrain remain deferred.
 
 Fields are sampled by **interpolation** (smooth value + gradient at the exact position, no cell-edge jumps) and
-uptake is a **continuous rate** (∝ local concentration × dt), so discreteness never leaks into the biology
+uptake requests are calculated from a **continuous rate** (proportional to local concentration × dt) before
+being committed as exact integer quanta, so the storage grid does not become a per-cell biological rule
 (Law 6). The grid only *stores* the field; it is a discretization detail behind the field interface, not a
 structure the creatures can feel.
 
 ## 3. Package layering and the import firewall
 
-Python has no compile-time assembly firewall, so the boundaries are enforced by an **import-linter rule** in CI:
-a lower layer may not import a higher one (design §2.2; memory — architecture layering).
+Python has no compile-time assembly firewall, so boundaries are encoded as **import-linter contracts**. They
+are currently checked locally; a repository CI workflow has not yet been added.
 
-```
-numerics  →  physics  →  fields  →  genetics  →  core  →  observe
-(pure math)  (bodies+   (abiotic   (genome→     (colony,   (telemetry,
-             fluids,    fields)    body)        ledger,    read-only
-             geometry)                          step,      contract)
-                                                snapshot)
+```text
+numerics  <- physics
+    ^      <- fields <- economy
+    |                    |
+    +--------------------+
+
+core (later composition root) depends on public sibling contracts
+observe depends only on public read contracts
 ```
 
 - **numerics** — dtype policy, quaternions, the constrained solver, counter-RNG, the int64 transfer primitive.
@@ -141,24 +155,28 @@ numerics  →  physics  →  fields  →  genetics  →  core  →  observe
 - **physics** — articulated bodies + fluids + geometry through *real* physics. Defines the mechanical contracts
   (`DevelopedBody`, `FluidSample`, `ForceContributor`) and consumes them. **Knows nothing of creatures, genes,
   or economy** — it is the single sealed place to later solve cross-cluster determinism.
-- **fields** — the abiotic fields and the geology/terrain interface; *produces* `FluidSample`s.
+- **fields** — grid geometry, interpolation, and conservative transport. It owns generic `FieldSample`, not
+  body mechanics or reservoir transactions.
+- **economy** — exact nutrient reservoirs, reaction requests, transaction ordering, ledger, and snapshot. It
+  depends on public `fields` and `numerics`, never on `physics`.
 - **genetics** — the genome and development; *produces* `DevelopedBody`s. Neither fields nor genetics reach into
   physics internals; they hand physics its inputs and query *what* it provides.
-- **core** — the colony/world state, the conserved-ledger, the step orchestration, config, clock, snapshot, and
-  the public read-only contract surface (`core.contracts`).
+- **core** — later composition root for the colony/world and whole-tick orchestration. When bodies couple to
+  fields, core samples a field and constructs the physics-owned `FluidSample`/`MediumSample`; neither sibling
+  imports the other. Downstream consumers see only the public read-only contract surface (`core.contracts`).
 - **observe** — telemetry, plots, and the viewer/embodiment read surface. Depends one-way on `core.contracts`;
   **render can never feed fitness** (an equivalence gate makes any leak a CI failure).
 
-The payoff of clean boundaries (Law 5): every subsystem can start *trivial* (S0 = flat seabed, uniform
-minerals, empty vent list behind the geology interface) and grow *arbitrarily faithful* later (Voronoi
+The payoff of clean boundaries (Law 5): every subsystem can start *trivial* (S1 = a closed all-ocean nutrient
+column with analytic light and prescribed vertical mixing) and grow *arbitrarily faithful* later (Voronoi
 structural field + moving hotspots + rivers) with **zero downstream changes**, because consumers query the
 output *categories*, never the mechanism (design §3.4 — the abstraction boundary is the one load-bearing
 terrain decision).
 
 ## 4. The load-bearing physics decision: additive force-contributors
 
-Locomotion is architected as **additive force-contributors on one articulated-body core** (design §4.5; memory
-— sea-to-land). The body core owns articulated state and assembles the effective inertial matrix; each force law
+Locomotion is architected as **additive force-contributors on one articulated-body core** (design §4.5).
+The body core owns articulated state and assembles the effective inertial matrix; each force law
 is a *contributor* that adds into one force sum. `SwimEval`'s hydrodynamics (Lighthill/Lamb undulatory thrust,
 wake, added mass, drag) is the **first and, at S0, only** contributor.
 
@@ -173,8 +191,8 @@ hydrodynamic contributor exists at S0.
 
 Genes are a **developmental recipe**, not a blueprint. The genome is a **bounded recursive directed part-graph**
 (Karl Sims 1994) with **NEAT innovation-number markings** on every node/edge, **developed by a fixed-depth
-batched scan** into a `DevelopedBody` segment tensor that feeds the physics unchanged (design §5; memory —
-genome resolution). It is a *migration* of the prior `BodyGraph` (tree→graph + innovation ids), not a rewrite.
+batched scan** into a `DevelopedBody` segment tensor that feeds the physics unchanged (design §5). It is a
+*migration* of the prior `BodyGraph` (tree→graph + innovation ids), not a rewrite.
 
 - Development is a **fixed-shape pure function** — all growth happens in `Mutate()`, so `develop()` batches on
   the GPU over a heterogeneous population.
@@ -187,30 +205,30 @@ genome resolution). It is a *migration* of the prior `BodyGraph` (tree→graph +
 
 ## 6. The conserved economy: the books close
 
-Every tracked quantity lives in a **named reservoir**; every change is a **transfer between reservoirs** — never
-a raw `R += x` and never a mint (design §6; Law 2). Conservation is the top CI gate. The conserved reservoir
-totals are **int64 fixed-point quanta** (exact regardless of float summation order or GPU atomics), so
-`close_books()` is an exact integer equality, not a tolerance. Two currencies (mass, energy) each close in their
-own quanta; see the honest treatment of the energy ledger in §III (it is a metabolic-*expenditure* ledger plus
-an f32 total-energy invariant — the two are not summed). Geology is the ultimate source (vents, weathering) and
-sink (burial → a tracked sediment reservoir), so nothing is deleted.
+Every tracked conserved quantity lives in a **named reservoir**; every state change is a **transfer between
+reservoirs** — never a raw `R += x` and never an undeclared source (design §6; Law 2). The system boundary is
+explicit: a closed slice has no external flux, while a later open slice represents sunlight, geology, heat, or
+burial through named boundary transactions. Conserved reservoir totals are **int64 fixed-point quanta**, so
+`close_books()` is exact integer equality rather than a float tolerance.
 
-At **S0** only a *fake* mass-reservoir exercises the transfer/`close_books` machinery — the real economy
-(nutrient loop S1, energy loop S3) is deferred, but the primitive it validates is real.
+At **S0** only a *fake* mass reservoir exercises the transfer primitive. **S1 conserves nutrient mass only**
+across exactly `Nd_q`, `Bp_q`, `Bd_q`, and `Bm_q`; concentration and chemical-energy equivalents are derived
+diagnostics, never stored mirrors. A native energy ledger waits for real reserve and heat reservoirs. S0's
+mechanical `R_step` is a discrete work-consistency residual, not total physical-energy conservation.
 
 ## 7. The embodiment seam: a state contract
 
 The sim↔Talos boundary is a **state contract** — a defined, versioned, serializable schema of state (senses out,
-actions in), not a chatty API (design §7.4; memory). Sophia's entire neural stack lives *behind* Talos, outside
-the sim. Because it is a serializable state schema, the *same* interface transfers to a physical TurtleBot3
-(sim creature + robot = one "mobile sensate navigator"). The frozen-heading physics already realizes the fish's
-real 2-DOF {surge, yaw}, so the action-transfer risk is low; the residual risk is observation-side (the chemical
-gradient sense). This seam is built at **S8**, but it constrains the read surface (`core.contracts`, `observe`)
+actions in), not a chatty API (design §7.4). Sophia's entire neural stack lives *behind* Talos, outside
+the sim. Because it is a serializable state schema, the same interface may later transfer to a physical
+TurtleBot3. S0 realizes constrained horizontal x/z translation with a frozen heading; it has no yaw state or
+angular integration. The `{surge, yaw}` action contract and its performance remain S2/S8 risks, alongside
+observation transfer. This seam is built at **S8**, but it constrains the read surface (`core.contracts`, `observe`)
 from day one.
 
 ## 8. The verification spike: S0 / SpikeSwim
 
-S0 is the **go/no-go for the whole vectorization thesis** (design §7.2; the consolidated S0 plan). It ports the
+S0 is the measured gate for the **locomotion component** of the vectorization thesis. It ports the
 donor's one-shot, **frozen-heading** `Sim.Step` to batched torch over realistic heterogeneous H1/H2 populations
 and answers one bounded question by *measurement*:
 
@@ -221,12 +239,13 @@ and answers one bounded question by *measurement*:
 S0 has **no ecology, genome mutation, steering, or metabolic ledger**. It is graded on five gates — scaffold
 integrity (A), physical/oracle fidelity against two independent arms (B), force/power + discrete mechanical
 consistency (C), reproducibility posture (D), and throughput/affordability on mandatory H1/H2 populations (E) —
-producing a telemetry-backed **GO / CONDITIONAL GO / NO-GO** decision. See the consolidated S0 plan for the full
-acceptance contract; the API surfaces S0 builds are in Part III.
+producing a telemetry-backed **GO / CONDITIONAL GO / NO-GO** decision. The original 90M gate produced NO-GO;
+the later owner-pinned 5,000/10,000 population gate produced GO. The full whole-tick affordability question
+remains later authority. See the S0 plan, revision, and reports for the acceptance history.
 
 ## 9. Determinism posture (relaxed, three tiers)
 
-The determinism target is three tiers (design §2.7; memory — relaxed 2026-07-12):
+The determinism target is three tiers (design §2.7; relaxed 2026-07-12):
 
 - **Tier 1 — exact conservation** (int64-quanta reservoirs). **Hard gate.** Exact regardless of float order or
   GPU atomics.
@@ -241,13 +260,13 @@ float *replay*, never physical *correctness*.
 
 ## 10. The build roadmap (what exists, what's next)
 
-Depth-first — each slice closes its books before the next exists (design §7.3; memory). Nothing below S0 is
-built yet.
+Depth-first — each slice closes its books before the next exists. S0 and S1 are implemented and measured; S2
+is next.
 
 | Slice | Scope | Status |
 |---|---|---|
-| **S0** | SpikeSwim — vectorized frozen-heading locomotion; verify the thesis by measurement | **implemented; in verification** |
-| S1 | Conserved single-nutrient economy (keystone; books must close) | designed |
+| **S0** | SpikeSwim — vectorized frozen-heading locomotion; verify the thesis by measurement | **GO under the revised population-grounded gate (original 90M floor = historical NO-GO)** |
+| **S1** | Conserved single-nutrient economy (keystone; books must close) | **complete; GO** |
 | S2 | One canonical body + live locomotion for every creature; the additive-force seam; kill `eff[]` | designed |
 | S3 | Feeding / metabolism / reproduction on conserved energy | designed |
 | S4 | Predation as a staged contest between bodies (no seeded predator) | designed |
@@ -262,8 +281,8 @@ built yet.
 # Part III — Technical Reference (developer-facing API, as implemented)
 
 **Primary sources: the code (`src/sirrobin/…`, cited `file:line`) and the accepted plan (the consolidated S0
-implementation plan, cited *plan §*).** The design doc is the *target* for `[designed]` surfaces only. **S0 is
-substantially implemented** — every production module the plan's §3 lists exists. Conventions: SI units, ROS
+implementation plan, cited *plan §*).** The design doc is the target only where a later accepted correction or
+slice plan does not supersede it. **S0 and S1 are complete and measured.** Conventions: SI units, ROS
 REP-103 FLU body frame, Unity-order `(x,y,z,w)` quaternions (`numerics/quat.py:1`), radians, seconds. `B` =
 batch (bodies), `S` = `s_slot` = **17** (slot-0 sentinel + 16 real segments).
 
@@ -271,13 +290,16 @@ batch (bodies), `S` = `s_slot` = **17** (slot-0 sentinel + 16 real segments).
 
 ```
 src/sirrobin/
-  numerics/   dtype · quat · solve_constrained_xz · solve_donor · transfer      [S0, present]
+  numerics/   dtype · quat · solve_constrained_xz · solve_donor · transfer · flux [S0/S1]
   physics/    config · contracts · lamb · pose · force_reactive · force_fin ·   [S0, present]
               force_drag · mass_matrix · swim_step · energy
+  fields/     contracts · geometry · grid · sample · transport                   [S1, present]
+  economy/    config · contracts · state · ledger · reactions · step · snapshot [S1, present]
   core/       contracts (ArtifactRef) · clock (SimClock)                        [S0, present]
-  observe/    telemetry                                                          [S0, present]
-  validation/ corpus            benchmarks/ lifecycle · episode · locomotion     [S0, present]
-tools/  gain1_oracle.py · build_corpus.py         (offline; never imported by production)
+  observe/    telemetry · economy                                                [S0/S1, present]
+  validation/ corpus · drift · economy  benchmarks/ lifecycle · episode · locomotion
+tools/  build_corpus · build_fixture_manifest · build_s0_report · gain1_oracle · profile_locomotion ·
+        run_benchmark_cell · run_determinism_diagnostic · run_drift   (offline; never imported by production)
 oracle/ SirRobinOracle.csproj + shims + fixtures/ (C# donor + frozen JSON)
 tests/  flat test_*.py       pyproject.toml · setup.cfg (import-linter)
 ```
@@ -285,20 +307,40 @@ tests/  flat test_*.py       pyproject.toml · setup.cfg (import-linter)
 Deltas from the plan's §3 tree (all deliberate): **`config` lives in `physics/`, not `core/`** — so `physics`
 can import it without breaking the `physics ⊄ core` rule; **`physics/energy.py`** and **`benchmarks/episode.py`**
 are extras (the Gate-C energy gates + the episode harness); the plan's **`spikeswim/` package is split** into
-`validation/` (frozen evidence) + `benchmarks/`; there is **no `rng.py`/`snapshot.py`/`report.py`** (S0 uses
-deterministic fixed-schedule churn, no sampler — plan §3); **no `fields/`/`genetics/`** (S1+). Import order is
-enforced by `setup.cfg` import-linter: `observe → core → physics → numerics`, `numerics` the leaf, `physics`
-forbidden from importing `core`/`observe`. Package `__init__.py` are docstring-only markers — import concrete
+`validation/` (frozen evidence) + `benchmarks/`. S1 adds a real economy snapshot but no Philox sampler or full
+`Colony` snapshot; report generation remains offline under `tools/`. There is still no `genetics/` package.
+Boundaries are **configured and checked with `setup.cfg` import-linter** (not enforced by CI — no workflow
+exists yet): `numerics` is the leaf; `physics` and `fields/economy` are independent siblings; `economy` may
+import public `fields` and `numerics`; `fields` imports only `numerics`; neither imports `core`. Package
+`__init__.py` are docstring-only markers — import concrete
 modules: `from sirrobin.physics.swim_step import SwimKernel`.
 
 ## III.2 Config & time
 
 **`LocomotionConfig`** (`physics/config.py:10`) — the single frozen config + unit anchor; every value part of
-`sha256()` (`:60`). Fields include `worlds=1, n_cap=1024, n_live=1000, s_max=16, max_depth=5, dt=1/120,
+`sha256()` (`:60`). The dataclass retains the original S0 experiment defaults
+`worlds=1, n_cap=1024, n_live=1000, s_max=16, max_depth=5, dt=1/120,
 rho_water=1000, rho_neutral_gene=4, kg_per_sim_mass=250, drag_coeff=0.1, fin_profile_cd=0.02, fin_span_eff=0.9,
 fin_stall_aoa=0.35, ellipsoid_mass_gain=1, fin_plane_gain=1, kappa_max=1e6, lam_floor_kg=1e-9, eps_spd=1e-6`,
-the Gate-C tolerances (`p_atol_f64/f32`, `e_atol_f64/f32`, `rtol_f64/f32`), `throughput_floor=9.0e7`,
-`vram_cap_bytes=11 GiB`; `s_slot = s_max+1 = 17`. **`validate()`** (`:43`) enforces the frozen invariants: donor
+the Gate-C tolerances (`p_atol_f64/f32`, `e_atol_f64/f32`, `rtol_f64/f32`), and the historical
+`throughput_floor=9.0e7`,
+`vram_cap_bytes=11 GiB`; `s_slot = s_max+1 = 17`.
+
+> **Historical vs. current throughput authority.** `n_cap=1024`, `n_live=1000`, and `throughput_floor=9.0e7`
+> (90M) are the **historical defaults of the original failed experiment**, preserved for config-hash provenance
+> — they are **not** current policy. The revised gate derives the floor from the live population as
+> `floor = N_live × 120 Hz × 1×`:
+>
+> | Live population | Capacity | Hard floor (1× real-time) |
+> |---:|---:|---:|
+> | 5,000 | 5,120 | 600,000 creature-steps/s |
+> | 10,000 | 10,240 | 1,200,000 creature-steps/s |
+>
+> Measured minimums (min of 5 reps, CUDA r2 rung, RTX 5070, zero regularization, non-OOM): H1@5k 1.68M (2.80×),
+> H2@5k 1.51M (2.52×), H1@10k 2.44M (2.03×), H2@10k 2.38M (1.99×) — i.e. **~2× real-time at 10,000 creatures**.
+> The 5× and 10× throughput classes are **optimization targets, not met and not gates**.
+
+**`validate()`** (`:43`) enforces the frozen invariants: donor
 caps `s_max=16, max_depth=5`; `dt=1/120`; **`kg_per_sim_mass == rho_water/rho_neutral_gene`** (`250 == 1000/4` —
 the mass-unit anchor's pinned provenance); `ellipsoid_mass_gain ∈ {0,1}` and `fin_plane_gain ∈ [0,1]`.
 
@@ -310,6 +352,13 @@ the mass-unit anchor's pinned provenance); `ellipsoid_mass_gain ∈ {0,1}` and `
 **`SimClock`** (`core/clock.py:6`) — `now: float, step: int`; `advance(dt)` (`:11`) raises on `dt≤0`, else
 `now += dt; step += 1`. Sim-owned time; physics reads no wall-clock. (The design doc's fuller `Colony`
 Environment API with `reset/step/state/load` is **[designed]** — no `Colony` exists yet; §III.8.)
+
+**`EconomyConfig`** (`economy/config.py`) — the hash-bound S1 configuration: one `64×64×32` grid over
+`640×640×160 m`, `dt_eco=8640 s`, and `q_mass=1e-9 mol` nutrient per integer quantum. It derives transport
+substeps from mixing/sinking CFL constraints, enforces a positive deep remineralization floor whose residence
+time fits the validation horizon, rejects reaction steps above the frozen rate bound, and caps configured
+inventory below `2^62`. `with_half_timestep()` constructs the authorizing convergence configuration without
+changing physical rate anchors.
 
 ## III.3 The body & step contracts (`physics/contracts.py`)
 
@@ -440,35 +489,76 @@ Validated against **two independent oracle arms** (plan §2.2): **gain0** (untou
 `test_oracle_independence.py`). Three oracle/corpus gaps the plan review flagged (H0/H1/H2 definition,
 `KgPerSimMass` provenance, frozen fixture values) are now closed in code.
 
-## III.8 Not yet built — `[designed]` (the design doc is the target)
+## III.8 S1 conserved-nutrient API (as implemented)
+
+- **`EconomyState` / `EconomyCarries`** (`economy/state.py`) — the only authoritative nutrient state:
+  `nd_q/bp_q/bd_q/bm_q[W,Gx,Gy,Gz]` as int64 quanta, plus named float64 sub-quantum reaction carries, a
+  sinking-face carry, and one outgoing mixing carry per source cell before face apportionment. Step, ecological
+  time, and buffer parity are scalar tensors so compiled execution does not recompile on Python metadata
+  changes. `validate()` enforces shapes, dtypes, carry intervals, nonnegativity, and `<2^62`.
+- **`MassLedger`** (`economy/ledger.py`) — freezes expected totals per world and returns an exact Boolean closure
+  result per world. There is no relative mass tolerance.
+- **`numerics.flux`** — `commit_flux` converts nonnegative f64 requests plus bounded carry into availability-
+  limited integer transfers without turning shortfall into future debt; `deterministic_fraction` performs the
+  exact one-debit/two-credit BGE split; `apportion_integer` uses stable largest-remainder allocation for competing
+  face debits.
+- **Fields** — `GridGeometry`; generic `FieldSample(value_mol_m3,gradient_mol_m4)`; `sample_reservoir` for
+  trilinear sampling with periodic x/y and closed z; public positions use ENU world coordinates with surface
+  `z=0`, water `z<0`, and internal `depth=-z`; `ScalarGrid` is the read surface plus a synthetic exact
+  `deplete_at` probe; and conservative `sink_vertical` / `mix_vertical`. Fields own no economy state and import no
+  economy or physics package.
+- **`reaction_step`** (`economy/reactions.py`) — computes all local requests from the same old snapshot, then
+  commits producer maintenance, mortality, primary production, BGE decomposition, and microbial turnover.
+  Production cannot create the first producer quantum; conservative `Bp` mixing provides recolonization.
+- **`EconomyKernel.step`** (`economy/step.py`) — reactions → closed-bottom `Bd` sinking → same-snapshot
+  `Nd/Bp/Bm` mixing → tensor clock/parity advance → exact per-world closure ledger. Transport substeps are frozen
+  in the config hash.
+- **`save_snapshot/load_snapshot`** (`economy/snapshot.py`) — safetensors state plus JSON schema/config metadata;
+  restores every reservoir, carry, clock value, and parity bit. A negative test proves omission of carries changes
+  committed continuation.
+- **Validation/evidence** — `validation/economy.py` owns the hard uncapped bloom and half-timestep comparison.
+  Frozen NumPy-only fixtures live under `oracle/fixtures/economy/`; the S1 GO report is
+  `docs/superpowers/reports/2026-07-12-sirrobin-S1-decision-report.md`.
+
+The authorizing results are exact closure over a one-million-step production soak; a full bloom/crash at
+`d_dd=0`; all half-step aggregate differences below 0.3%; and a non-OOM full grid on the RTX 5070. Compiled CUDA
+is fastest at a median 109.1 ecology steps/s with about 38 MiB peak allocation. These results authorize the
+material cycle only—not grazing, self-shading, burial, a complete biological pump, or creature energy.
+
+## III.9 Not yet built — `[designed]` (the design doc is the target)
 
 These are in Parts I–II and the design doc but have **no code** yet; a later slice builds them. Do not treat
 their signatures as final.
 
-- **`Colony` / Environment API** (`reset/step/state/load`) — the top-level driver; S0 drives via `SwimKernel` +
-  the benchmark harness (design §2.6). **[designed, S1+]**
+- **`Colony` / Environment API** (`reset/step/state/load`) — the top-level driver; S0 drives via `SwimKernel`
+  and S1 via `EconomyKernel`; whole-tick composition remains later. **[designed, S2+]**
 - **`ForceContributor` Protocol** — the additive-force seam (`F_total = F_hydro + F_gravity + F_buoyancy +
   F_contact`, summed-never-switched, medium decides dominance — what makes water↔land free); S0 calls the three
   channels directly in `SwimKernel` (design §4.5). **[designed, S2]**
 - **`genetics` (`develop`, genotype tensors, mutation/crossover/distance/mating)** — S0 uses hand-authored
   corpus bodies, not genome development; innovation-id alignment enables emergent speciation `[frontier]`
   (design §5). **[designed, S2+]**
-- **`fields` (`Field.sample`, `Geology` protocol, structural `Φ`, `MediumSample`)** — no abiotic fields at S0;
-  consumers will query *what* not *how* (design §3). **[designed, S1+]**
-- **The conserved economy** (`primary_production`, `remineralize`, `graze`, `metabolism`, `reproduce`,
-  `predation_step`; two currencies `N`/`E`; `close_books` over real reservoirs `Nd/Bp/Bd/Bm/struct_N/Sed`) — S0
-  has only the int64 transfer *primitive* on a fake reservoir. Honest note: the exact-int64 energy ledger is a
-  metabolic-*expenditure* ledger; total physical energy (incl. f32 kinetic energy, which Law 4 forbids mirroring
-  in int64) closes at f32 tolerance (design §6; the S0-review lineage). **[designed, S1/S3]**
-- **The Talos state contract** — the versioned CORE/EXT dict-of-tensors + `Header`; CORE action = the 2-vector
-  `{surge_effort, yaw_rate}` → `geometry_msgs/Twist`, so a CORE-only policy transfers to a TurtleBot3 unchanged.
-  `core/contracts.py` currently holds only `ArtifactRef{path, sha256}` (design §7.4). **[designed, S8]**
-- **`rng` (Philox), `snapshot`** — S0 uses deterministic fixed-schedule churn; no sampler / full-world snapshot
-  yet (plan §3). **[designed, S3/later]**
+- **Later abiotic fields** — geology, structural `Φ`, currents, temperature, terrain, and the core adapter from
+  generic `FieldSample` to physics-owned `MediumSample`. S1 implements only conserved nutrient/biomass grids,
+  analytic light, and prescribed vertical transport. **[designed, S2/S6/later]**
+- **Later trophic/energy economy** — creature structural nutrient and real reserve/heat reservoirs, feeding,
+  metabolism, reproduction, sediment/burial, and predation arrive only with the mechanisms that use them.
+  Derived chemical-energy diagnostics are not authoritative reservoir state. **[designed, S3/S4/later]**
+- **The Talos state contract** — the versioned CORE/EXT dict-of-tensors + `Header`; the **design-target** CORE
+  action is the 2-vector `{surge_effort, yaw_rate}` → `geometry_msgs/Twist`. S0 is frozen-heading with no yaw;
+  live yaw (`StepLive`) is an **S2** performance-and-fidelity risk, and the claim that a CORE-only policy
+  transfers to a TurtleBot3 unchanged is **unverified**. `core/contracts.py` currently holds only
+  `ArtifactRef{path, sha256}` (design §7.4). **[designed, S8]**
+- **`rng` (Philox), full `Colony` snapshot** — S1 has an exact economy snapshot, but no biological sampler or
+  composed world/creature snapshot yet. **[designed, S3/later]**
 
 ---
 
-*Maintenance: Part III is grounded in the code (`file:line`) + the accepted plan (§) — a **snapshot taken
-2026-07-12 while S0 is under active development**, so exact line numbers will drift and small surfaces (e.g.
-`StepLedger` fields) may change between edits; re-verify against `src/` before relying on a specific `file:line`.
-Promote `[designed]` items to their slice as they land.*
+*Maintenance: Part III is grounded in the code (`file:line`) plus the accepted slice authorities — the
+consolidated S0 plan, the population-grounded **Gate-E revision**
+(`docs/archive/plans/2026-07-12-sirrobin-locomotion-gate-E-revision.md`), the **S1 conserved-nutrient
+implementation plan**, and both slice decision reports (reflecting S0 and S1 GO as of 2026-07-12). **This is a
+living document: keep it current as the code and slices land — update it with the code, don't let it fall
+behind.** Exact line numbers are **navigational, not stable API identifiers**: they will drift and small
+surfaces (e.g. `StepLedger` fields) may change between edits, so re-verify against `src/` before relying on a
+specific `file:line`. Promote `[designed]` items to their slice as they land.*

@@ -3,6 +3,12 @@
 **Status:** Draft for implementation • Consolidated master spec • **Date:** 2026-07-11
 **Register:** Implementation specification (normative). Not a vision essay — every claim is intended to be buildable and testable.
 
+> **2026-07-12 authority amendment.** The consolidated S0 plan plus population-grounded Gate-E revision govern
+> S0. The consolidated S1 conserved-nutrient plan governs S1 and supersedes older float-ledger, reservoir,
+> energy, parcel-timing, and package-layering prose below. S0 is complete: the original 1,000/90M gate remains
+> NO-GO and the pre-registered 5,000/10,000 population gate is GO. S1 is also implemented and records GO in
+> `docs/superpowers/reports/2026-07-12-sirrobin-S1-decision-report.md`; S2 is next.
+
 ---
 
 ## Scope
@@ -127,22 +133,30 @@ torch (not numpy) is the substrate because: (a) `device=` portability — identi
 
 ### 2.2 Package layering and enforced import boundaries (P4)
 
-Python has no compile-time firewall, so layering is enforced by a **CI `import-linter` contract**, not convention. The dependency graph is strictly one-way:
+Python has no compile-time firewall, so boundaries are encoded by `import-linter` contracts. The capability
+graph has independent siblings rather than a fictitious total ordering:
 
-```
-numerics  →  physics  →  fields  →  genetics  →  core  →  observe
+```text
+numerics <- physics
+numerics <- fields <- economy
+numerics <- genetics
+core later composes public sibling contracts; observe reads public contracts
 ```
 
 | Package | Owns | May import | Must NOT import |
 |---|---|---|---|
 | `numerics` | dtype/device policy, quaternion & 3×3 solves, segmented reductions, RNG manifest, compensated-sum ledger | (stdlib, torch) | anything below |
 | `physics` | articulated-body dynamics; additive force-contributors; `DevelopedBody`, `MediumSample`/`FluidSample` contracts | `numerics` | `fields`, `genetics`, `core` |
-| `fields` | abiotic continuous fields (nutrient, temp, light, later currents/terrain); produces `MediumSample` | `numerics`, `physics` (contracts only) | `genetics`, `core` |
+| `fields` | grid geometry, generic `FieldSample`, interpolation, conservative transport | `numerics` | `physics`, `economy` internals, `genetics`, `core` |
+| `economy` | exact conserved reservoirs, transactions, reactions, ledger, snapshot | `numerics`, public `fields` | `physics`, `core`, `observe` |
 | `genetics` | genome tensors, development scan → `DevelopedBody`, mutation/crossover/distance | `numerics`, `physics` (contracts only) | `fields`, `core` |
-| `core` | the `Colony` state, step orchestration, conserved economy, spatial hash | all above | `observe` |
+| `core` | later `Colony` composition, whole-tick orchestration, spatial hash, sibling adapters | public contracts above | `observe` |
 | `observe` | telemetry (parquet/CSV/heatmaps), the Talos state contract, the Unity/replay viewer feed | all above | — |
 
-A violation (e.g. `physics` importing `core`) fails the build. This replaces the C# assembly-definition firewall the prior build lost when it collapsed into the `OceanColony` god-class. Per P4, each layer exposes *what it provides, never how*: `physics` defines the mechanical contracts and knows nothing of creatures, genes, or economy; `genetics` produces bodies and `fields` produce fluid samples, neither reaching into `physics` internals. The terrain/geology interface is the canonical example (§3.4).
+A violation (e.g. `physics` importing `core`) fails an import-linter check. `physics` owns its mechanical
+`FluidSample`/future `MediumSample`; `fields` owns generic `FieldSample`. The future `core` composition root
+samples fields and constructs the mechanical input, so neither sibling imports the other. This replaces the C#
+assembly-definition firewall lost in the prior `OceanColony` god-class.
 
 ### 2.3 The entity model: point-entities in continuous space, on continuous fields (P5)
 
@@ -269,7 +283,7 @@ class Colony:
 (Canonical home; §4.8, §7.1.3 reference it.) Never blanket float64 (consumer RTX FP64 is a 32–64× throughput cliff). The hot loop is **float32** with *relative* conservation tolerances; **float64 is used in exactly three places:**
 
 1. the one-time `LambK` added-mass k-factor precompute (the donor computes it in double; matching the oracle requires it);
-2. the **global conservation/energy ledger**, accumulated by compensated/pairwise summation;
+2. the **energy/validation-arm ledger reductions and f64 diagnostics**, accumulated by compensated/pairwise summation — conserved **mass** reservoirs are exact **int64 quanta** and close by exact `==` (§6, INV-MASS), *not* a float64 ledger;
 3. the S0 oracle-match configuration, to isolate "is the math correct" from float32 transcendental divergence.
 
 Acceptance thresholds (measured in S0, carried forward): mixed dimensioned per-step force and `R_step`
@@ -281,7 +295,7 @@ tolerances; the executable 100,000-step prefix ratio `D_k=|ΣR|/Σ|scale|` stays
 
 - **`device=` is a knob on the immutable `Config`.** The identical batched code runs CPU or CUDA. **GPU from day one, scope = ONE large world** batched over its population; many-parallel-worlds batching is deferred to S8. GPU's payoff over multicore CPU **rises with population size**, so **S0/SpikeSwim measures the CPU↔GPU crossover `B*` at the real population size** and the device is chosen on numbers.
 - **Start small and dense (P6/P7).** The near-term world is a small, dense, periodic, all-ocean box holding a modest-but-viable population (dense hundreds-to-low-thousands: enough standing variation to avoid drift/extinction). The lever is **density, not size**. Scale world and population up together, deliberately, once the loop works.
-- **Honest performance framing (engineering risk, stated plainly).** The prior build hit ~3 fps at fewer than ~5,000 organisms — *not* evidence the physics is slow: profiling attributed the dominant spike to `InfiniteWorld.Update` (45–69 ms of terrain-chunk streaming + PhysX collision-mesh baking, "unrelated to creatures"), with the faithful physics math ~100–200× cheaper than the per-frame budget. Dying at a *low* count is the textbook signature of fixed **per-object overhead** (5k GameObjects/Transforms/MonoBehaviours, the managed↔native boundary, PhysX, GC, IMGUI HUD) — all of which the headless batched-torch Core deletes by construction. **This is a different performance regime, but it is NOT asserted to be fast.** S0's frozen locomotion floor is **9.0e7 creature-steps/s** at `N_cap=1024`, `N_live=1000`, separately required on realistic H1 and H2. The later whole-tick floor is **2.31e7** at G-E2E and is not an S0 authorization number. H0 never authorizes (§7.2).
+- **Honest performance framing (engineering risk, stated plainly).** The prior build hit ~3 fps at fewer than ~5,000 organisms — *not* evidence the physics is slow: profiling attributed the dominant spike to `InfiniteWorld.Update` (45–69 ms of terrain-chunk streaming + PhysX collision-mesh baking, "unrelated to creatures"), with the faithful physics math ~100–200× cheaper than the per-frame budget. Dying at a *low* count is the textbook signature of fixed **per-object overhead**. The original S0 floor of **9.0e7 creature-steps/s** at 1,000 live remains a recorded NO-GO. The subsequently pre-registered population-grounded gate requires 600k at 5,000 and 1.2M at 10,000; all H1/H2 cells passed. This authorizes locomotion viability, not a complete future tick budget. H0 never authorizes (§7.2).
 
 ---
 
@@ -291,9 +305,15 @@ tolerances; the executable 100,000-step prefix ratio `D_k=|ΣR|/Σ|scale|` stays
 
 The world is a **thin, conserved stage** whose only job is to generate the selective gradients evolution needs; sophistication is spent on the biology, not the abiotic model. Every subsystem obeys "abstract in mechanism, faithful in causality" (§1.2). The world is **field-first**: one static structural field is canonical, and terrain, geological sources, mineral distribution, and (later) land/rivers/sediment are all *derived readouts* of it, never placed by hand.
 
-The two representational kinds are those of §2.3 (continuous FIELDS vs point-ENTITIES). The dividing line: smooth "property-of-space" quantities dense everywhere (temperature, current, light, the slowly-varying background nutrient reservoir) are fields; patchy mass consumed at a point (a plankton parcel, a bite of detritus) is an entity. A field is a **distinct KIND** behind a one-way read interface with zero sync glue — not the same quantity stored twice (P3-compliant).
+Three storage roles are distinguished without duplicating authoritative state: continuous-position point
+entities; mutable conserved Eulerian reservoirs changed only by economy transactions; and exogenous abiotic
+drivers sampled through one-way interfaces. S1's nutrient and biomass grids are the second role, not read-only
+backgrounds. Concentration is always derived from int64 inventory and cell volume.
 
-**Roadmap placement:** a stubbed world interface exists from **S0**; the conserved nutrient/light column is **S1**; currents/weather/transport arrive at **S6**; the full land cascade and coastal corridor are deferred together to **S9**. Everything below is designed for the S9 destination but implemented trivially first, so the generator climbs without downstream change (P4/P6).
+**Roadmap placement:** S0 had no world-field implementation. The exact conserved nutrient/light column is
+implemented in **S1**; currents/weather/horizontal transport arrive at **S6**; the full land cascade and coastal
+corridor are deferred together to **S9**. Everything below is designed for the S9 destination but implemented
+trivially first, so the generator climbs without downstream change (P4/P6).
 
 ### 3.2 Coordinate system, units, and the field-grid vs spatial-hash distinction
 
@@ -437,7 +457,7 @@ The world does not *cause* the crossing — that emergence is the hard S9 fronti
 
 ### 3.12 World-model invariants (acceptance gates)
 
-- **INV-W1 — Conservation (P1).** Every reactive field's total tracked mass (`Σ_cells conc·cell_volume` + entity-bound + reservoir) is constant to a *relative* tolerance under a float64 compensated-sum ledger, net of explicit tracked sources/sinks. Static fields (`Φ`) carry no mass. Elevation change is matched 1:1 against sediment/geological reservoir transfer.
+- **INV-W1 — Conservation (P1).** Every conserved reactive field stores its tracked mass as **int64 mass quanta** and closes **exactly** (`==`) per world, net of explicit tracked sources/sinks (§6, INV-MASS) — not a float64 relative-tolerance ledger. Static fields (`Φ`) carry no mass. Elevation change is matched 1:1 against sediment/geological reservoir transfer.
 - **INV-W2 — Single canonical representation (P3).** Render mesh, slope, normals, `is_land`, waterline are all *derived* from `h`/`Φ`; none stored and synced.
 - **INV-W3 — Continuity (P5).** All biological reads go through `sample(x)`; no consumer indexes a field cell; uptake is a continuous rate.
 - **INV-W4 — Interface opacity (P4).** Consumers import only the `Geology`/`Fields` protocols (CI import-boundary check).
@@ -884,19 +904,21 @@ This section specifies the biogeochemical and trophic layer: a closed, conserved
 
 **Single canonical representation (P3).** `N` is the canonical stored quantity in every biomass pool, measured in the **same currency everywhere** (mol nutrient-equivalent, biomass converted via Redfield), so every transfer is 1:1 and conservation is `Σ reservoirs = const`. Energy content of a *producer/detritus* pool is a **derived readout** `E = c_cal · B` (caloric anchor), never a second stored-and-synced scalar. The one genuinely distinct kind is a **creature's energy reserve** (lipid/glycogen store, C-rich, decoupled from structural nutrient) — stored explicitly on the entity because it is a different quantity.
 
-**The closed inventory.**
+**The closed inventory.** S1 contains exactly four reservoirs:
 
 ```
-I_N(t) = Σ Nd  +  Σ Bp  +  Σ Bd  +  Σ Bm  +  Σ_alive struct_N  +  Σ Sed
-         dissolved  phyto  detritus microbial  creature-bound   sediment
+I_N,S1(t) = Σ Nd_q + Σ Bp_q + Σ Bd_q + Σ Bm_q
 ```
+
+Later slices extend the registry only when their mechanisms land: creature-bound `struct_N` arrives with real
+creatures, and `Sed` arrives with an enabled burial transfer. Neither exists as an S1 placeholder.
 
 | Reservoir | Representation | Tensor / SoA | Kind |
 |---|---|---|---|
-| `Nd` dissolved nutrient | continuous Eulerian **field** (diffuses) | `(W, Gx, Gy, Gz)` f32, f64 ledger reduction | abiotic field |
-| `Bp` primary-producer biomass | co-grid field at S1 (see §6.2 fork) | `(W, Gx, Gy, Gz)` | biotic |
-| `Bd` detritus (marine snow / POC) | co-grid field (the **reservoir**, §6.3.3) | `(W, Gx, Gy, Gz)` | biotic |
-| `Bm` microbial biomass | co-grid deep field (BGE product, §6.3) | `(W, Gx, Gy, Gz)` | biotic |
+| `Nd_q` dissolved nutrient | conserved Eulerian **reservoir field** | `(W, Gx, Gy, Gz)` int64 mass quanta | abiotic nutrient |
+| `Bp_q` primary-producer biomass | conserved co-grid reservoir field | `(W, Gx, Gy, Gz)` int64 mass quanta | biotic |
+| `Bd_q` detritus (marine snow / POC) | conserved co-grid reservoir field | `(W, Gx, Gy, Gz)` int64 mass quanta | biotic |
+| `Bm_q` microbial biomass | conserved co-grid reservoir field | `(W, Gx, Gy, Gz)` int64 mass quanta | biotic |
 | `struct_N`, reserve `E` | **point-entities** (creatures), SoA | `nutrient[W,N_cap]`, `energy[W,N_cap]`, `mass[W,N_cap]`, `pos[W,N_cap,3]`, `alive[W,N_cap]` | discrete |
 | `Sed` sediment | seafloor field | `(W, Gx, Gy)` | burial sink |
 
@@ -924,7 +946,9 @@ Contrast the prior build: production grew toward a **static Perlin cap** (`baseC
 
 **Rate anchor (units, not a balance knob — §1.2).** Calibrate `μ_max`, `c_cal`, and grid so cell-integrated production matches real net primary productivity: global mean **≈140–150 gC·m⁻²·yr⁻¹** (Field et al. 1998; oligotrophic ~50, upwelling ~300–400), phytoplankton carbon **≈45 kJ·gC⁻¹** (Platt & Irwin 1973), Redfield **C:N:P = 106:16:1** (Redfield 1934/1958). Freeze these as recorded derivations.
 
-**S1 representation fork (decide by measurement, §2.3).** Default: `Bp`/`Bd`/`Bm` are **Eulerian co-grid fields** (simplest, conservative in flux-form, GPU-optimal). Fallback if dense grazing quantizes: move producer/detritus biomass onto **Lagrangian resource parcels** (point-entities in the shared spatial hash) so a bite deletes a parcel and holes are never *stored*. Measure healing-vs-consumption rate in the S1 spike; do not assert.
+**Representation decision.** S1 implements only Eulerian `Bp_q/Bd_q/Bm_q` fields and records interpolation and
+synthetic point-depletion resolution. The parcel fork is deferred until real dense grazing exists; S1 does not
+build or authorize an unused second representation.
 
 ### 6.3 Bacterial remineralization — the BGE split and the microbial loop
 
@@ -999,25 +1023,31 @@ Reserve cap and reproduction bar **both scale ∝ M** (shared pivot) so headroom
 
 ### 6.6 Conservation invariants — the top CI gate (P1)
 
-Conservation is verified as **testable predicates on a float64 ledger**, the **primary correctness gate** (robust to sub-tolerance f32 noise), *not* byte-identity (§2.7).
+S1 nutrient conservation is verified as **exact int64 predicates**, the primary correctness gate, not
+byte-identity or a float reduction. Later currencies must define their real reservoirs before claiming closure.
 
 ```
 INV-MASS (per element):
-   | I_N(t) − I_N(0) − ∫₀ᵗ (source_geo − burial) dt | / I_N(0)  <  τ_mass       # τ_mass ~ 1e-9 (f64)
-   S1 closed box (no geology, no land):  I_N(t) == I_N(0)  exactly to tolerance
+   I_N(t) = Σ(Nd_q+Bp_q+Bd_q+Bm_q)
+   S1 closed box: I_N(t) == I_N(0) exactly, per world
 
 INV-TRANSFER (per transfer op):  every debit is paired with an equal credit
-   | Δ(source reservoir) + Δ(sink reservoir) |  <  ε_transfer  (~1e-6, f32)      # asserted per op
+   debit_q == Σ credits_q exactly; all operands int64 and nonnegative
 
 INV-ENERGY:
    | E_tot(t) − E_tot(0) − ∫₀ᵗ (P_sun − P_heat − P_burial) dt |  <  τ_energy
 ```
 
-Implementation: transfers are written as **paired atomic operations** (a helper that debits `src` and credits `dst` by the identical tensor, using deterministic `index_add_` with precomputed unique slots — no nondeterministic scatter, §2.7). A `close_books()` reduction runs every N ticks, in **float64 with compensated/pairwise summation** (§2.8), and dumps a `[CONS]` telemetry line. **The tell of a violation is synchronization glue or an unpaired write.**
+Implementation: transfers use one availability-limited integer debit and exact integer credit apportionment.
+`close_books()` runs after every authorizing step, checks each world independently, and rejects negative or
+`>=2^62` state. Concentration is derived in float64 for rates and is never stored as a synchronized mirror.
 
 **Prior-build failure modes this structurally forecloses:** (a) two free-energy sources (sunlight cap-well **and** vent flux both unbounded); (b) static Perlin cap production consuming no pool; (c) decoupled graze knobs; (d) remineralization matter discarded; (e) fecal pump routing an *energy* fraction as if it were *biomass*. Each is now impossible.
 
-**S1 acceptance gate:** `I_N` constant to `< 1e-9` relative over `≥1e5` ecological-days in the closed configuration; every transfer op passes INV-TRANSFER to `< 1e-6`; the row-sliced amortized field tick equals a whole-grid tick (no amortization bias). **Nothing proceeds past S1 until these are green (P7).**
+**S1 acceptance gate:** exact closure holds after every step of the 10^6-step closed soak; the uncapped
+`d_dd=0` pulse still rises, draws down nutrient, and crashes; and the same-horizon `dt_eco/2` run converges on
+the frozen bloom metrics. Row-sliced and whole-grid transaction order agree exactly. **Nothing proceeds past S1
+until these are green (P7).**
 
 ### 6.7 Geology as source and sink; iron patterning
 
@@ -1043,7 +1073,7 @@ Carrying capacity, blooms, deserts, and boom-bust are **derived** from the conse
 
 ### 6.9 Interfaces, tensor shapes, and engineering risk
 
-**Signatures (torch, `inference_mode`, f32 hot loop / f64 ledger):**
+**Signatures (torch, `inference_mode`, f32 hot loop / exact int64 mass-quanta reservoirs / f64 validation arm):**
 
 ```python
 def primary_production(Nd, Bp, light, cfg) -> (dBp, dNd)          # dNd == -dBp; clamp dBp<=Nd
@@ -1075,7 +1105,9 @@ This section specifies how SirRobin proves it is correct, the order it is built 
 
 #### 7.1.1 The primary gate is conservation, not byte-identity (P1)
 
-The top-level CI correctness gate is a set of **conservation invariants** checked to a *relative* tolerance on a `float64` ledger, run every commit. Bit-for-bit reproducibility is a *secondary*, same-machine-same-device regression check — never the pass/fail gate.
+The top-level correctness gate is exact int64 conservation for quantized reservoirs. Float mechanics and
+independent rate corroboration use dimensioned mixed tolerances. Bit-for-bit float replay is a secondary,
+same-machine-same-device diagnostic — never the primary pass/fail gate.
 
 **Rationale (the prior-build failure this prevents).** The donor's CI gate was **byte-identity** of a seeded run against a stored golden (FNV/BitConverter hash). That invariant is satisfiable by code that does nothing — so faithful mechanics shipped **disabled behind `gain=0` dials** to keep the golden green, and every new term shipped "ramped, defaulting to today's behavior." Fidelity therefore shipped *dark*. Byte-identity answers "did the numbers change?"; a conservation gate answers "do the books close?" and is by construction **robust to sub-tolerance float noise**, so it creates no pressure to gate mechanics off.
 
@@ -1085,7 +1117,9 @@ The top-level CI correctness gate is a set of **conservation invariants** checke
 closure_residual(t) = | Σ_i R_i(t) − Σ_i R_i(0) − ∫₀ᵗ X_ext dτ |  /  max(Σ_i R_i(0), ε)   <   τ_cons
 ```
 
-with `τ_cons = 1e-9` per step (float64 ledger) and a drift bound `< 1e-6` over a 10⁶-step soak. **The gate is on the drift curve being bounded-oscillating, not a single endpoint** — a slow monotone leak is the failure mode to catch.
+For S1 mass reservoirs this expression is implemented in integer quanta and must equal zero after every step of
+the 10^6-step soak. There is no tolerance or drift budget to consume. Mixed-tolerance residuals remain
+appropriate for independent float rate and mechanical equations, not conserved mass state.
 
 **Invariant CI-CONS-1 (no free channel).** Every code path that changes any `R_i` must, in the same transaction, apply the equal-and-opposite change to another `R_i` (or to `X_ext` with a declared source). Enforced as a test pattern (§7.1.4). The two-free-energy-sources bug and the "marine-snow silently deleted" bug are exactly the class this forbids.
 
@@ -1134,11 +1168,11 @@ corpora authorize and expose masking/heterogeneity cost. A flattened layout is n
 | **B** | Physical/oracle fidelity | Untouched gain0 donor plus independent analytic gain1; H1/H2 mandatory; zero authorization regularization |
 | **C** | Mechanical consistency | Mixed-tolerance force identities, discrete `R_step`, executable 100,000-step prefix budget |
 | **D** | Reproducibility posture | Exact discrete decisions hard-gated; float replay reported as a diagnostic |
-| **E** | Throughput | H1 and H2 each non-OOM and each clear `9.0e7` creature-steps/s at `N_cap=1024`, `N_live=1000` for GO |
+| **E** | Throughput | Historical 1,000/90M gate: NO-GO. Revised authority: H1/H2 non-OOM with zero regularization and minima ≥600k at 5,000 live and ≥1.2M at 10,000 live: GO. |
 
 The complete equations, frozen H0/H1/H2 distributions, tolerances, benchmark protocol, and GO/CONDITIONAL
 GO/NO-GO classes are normative in
-`docs/superpowers/plans/2026-07-12-sirrobin-S0-consolidated-implementation-plan.md`. This design document does
+`docs/archive/plans/2026-07-12-sirrobin-S0-consolidated-implementation-plan.md`. This design document does
 not restate or weaken them.
 
 **Falsifiers (any one trips → cheaply kill or revise the thesis before pouring commits on it):**
@@ -1159,7 +1193,7 @@ Nothing proceeds past a slice until its acceptance criterion (AC) is green on te
 | Slice | What it lands | Acceptance criterion (AC) |
 |---|---|---|
 | **S0 SpikeSwim** | Batched frozen-heading Lighthill step; the four gates of §7.2. | All four gates pass at **H1/H2** (not just H0); go/no-go decision recorded from telemetry. |
-| **S1 Conserved single-nutrient economy** *(keystone)* | Closed loop: Liebig×Monod drawdown, BGE remineralization, Martin sinking, vertical mixing (§6). | **Books close:** `closure_residual < 1e-9`/step, drift `< 1e-6` over 10⁶ steps, bounded-oscillating. Blooms/deserts emerge from the loop, not a static field. **Nothing proceeds until green.** |
+| **S1 Conserved single-nutrient economy** *(keystone)* | Exact four-reservoir loop: Liebig×Monod drawdown, producer loss, BGE split, microbial turnover, Martin sinking, `Nd/Bp/Bm` mixing. | **Books close exactly** every step over 10⁶ steps; uncapped `d_dd=0` bloom/crash passes; `dt_eco/2` convergence passes; no terminal reservoir trap. **Nothing proceeds until green.** |
 | **S2 One canonical body + live locomotion** | `BodyGraph → DevelopedBody → Sim.StepLive` (yaw-integrating P-controller — **re-measure throughput against StepLive before committing**). Feeding/metabolism/defense **derived from morphology** — `eff[]` deleted. | Every live creature swims via the one canonical body; `eff[]` gone; StepLive throughput re-cleared. Genome P0/P1 AC: batched torch develop-walk reproduces C# `Measure()` aggregates within tolerance (§5.3). |
 | **S3 Feeding / metabolism / reproduction on conserved energy** | Holling-II intake + assimilation loss → detritus; Kleiber metabolism; real morphology-derived juvenile construction cost. | A cohort feeds, grows, reproduces, dies with **energy books closed** end-to-end; population sustains without minting energy. |
 | **S4 Predation as a staged contest** | find → close → seize → consume, all conserved; **no seeded predator**. | A predatory strategy arises implicitly; transferred mass fully accounted (prey tissue → predator + detritus). |

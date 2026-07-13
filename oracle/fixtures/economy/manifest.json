@@ -1,0 +1,11 @@
+{
+  "config_hash": "7ba1174c3afb5d15753e6aff45d2ba2f87fad5e740aa4ab540cb72f7d206036a",
+  "files": {
+    "anchor_manifest.json": "4f6daefe32c496a3551309bd36e4de7efea49788bd284902e987c3c2a98baace",
+    "bloom_config.json": "53b640f86a7358a1bed64df3f0cb65047e803b68d6cc65e13e5ae8b77a96c86d",
+    "column_cases.npz": "c946da2d5826ea35f1ecff3403fab4e525eaab5b5b94241ba60f3c3fe3abf123",
+    "reaction_cases.json": "de5feb0559591704ec6c187e2d7202df5a7eea425682bc923ad644d452a09aae"
+  },
+  "generator_sha256": "c14de50b41fe2aea6400abd3484ebcf462508cf0eba5a20f4587a812a80d29f1",
+  "schema": "sirrobin.economy.fixture-manifest.v1"
+}

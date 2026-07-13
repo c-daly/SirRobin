@@ -1,0 +1,90 @@
+{
+  "cases": [
+    {
+      "expected": {
+        "combined_limitation": 0.0,
+        "decomposition_mol": 0.0,
+        "light_limitation": 0.9004814130076301,
+        "light_w_m2": 180.9674836071919,
+        "maintenance_mol": 0.0,
+        "microbial_turnover_mol": 0.0,
+        "mortality_mol": 0.0,
+        "production_mol": 0.0,
+        "remin_rate_s": 9.688346883468835e-07
+      },
+      "input": {
+        "bd_mol_m3": 0.0,
+        "bm_mol_m3": 0.0,
+        "bp_mol_m3": 0.0,
+        "depth_m": 2.5,
+        "nd_mol_m3": 0.0
+      },
+      "name": "zero"
+    },
+    {
+      "expected": {
+        "combined_limitation": 0.5,
+        "decomposition_mol": 0.04185365853658536,
+        "light_limitation": 0.9004814130076301,
+        "light_w_m2": 180.9674836071919,
+        "maintenance_mol": 0.09999999999999999,
+        "microbial_turnover_mol": 0.012499999999999999,
+        "mortality_mol": 10.049999999999999,
+        "production_mol": 0.24999999999999997,
+        "remin_rate_s": 9.688346883468835e-07
+      },
+      "input": {
+        "bd_mol_m3": 0.01,
+        "bm_mol_m3": 0.005,
+        "bp_mol_m3": 0.02,
+        "depth_m": 2.5,
+        "nd_mol_m3": 2.8e-05
+      },
+      "name": "half_nutrient"
+    },
+    {
+      "expected": {
+        "combined_limitation": 0.018031926640008248,
+        "decomposition_mol": 0.16660194174757278,
+        "light_limitation": 0.018031926640008248,
+        "light_w_m2": 0.3672609554057814,
+        "maintenance_mol": 0.09999999999999999,
+        "microbial_turnover_mol": 0.075,
+        "mortality_mol": 10.049999999999999,
+        "production_mol": 0.009015963320004122,
+        "remin_rate_s": 3.856526429341963e-07
+      },
+      "input": {
+        "bd_mol_m3": 0.1,
+        "bm_mol_m3": 0.03,
+        "bp_mol_m3": 0.02,
+        "depth_m": 157.5,
+        "nd_mol_m3": 0.0005
+      },
+      "name": "deep"
+    },
+    {
+      "expected": {
+        "combined_limitation": 0.9004814130076301,
+        "decomposition_mol": 0.8370731707317073,
+        "light_limitation": 0.9004814130076301,
+        "light_w_m2": 180.9674836071919,
+        "maintenance_mol": 2.5,
+        "microbial_turnover_mol": 0.25,
+        "mortality_mol": 6251.249999999999,
+        "production_mol": 11.256017662595376,
+        "remin_rate_s": 9.688346883468835e-07
+      },
+      "input": {
+        "bd_mol_m3": 0.2,
+        "bm_mol_m3": 0.1,
+        "bp_mol_m3": 0.5,
+        "depth_m": 2.5,
+        "nd_mol_m3": 0.1
+      },
+      "name": "saturated"
+    }
+  ],
+  "config_hash": "7ba1174c3afb5d15753e6aff45d2ba2f87fad5e740aa4ab540cb72f7d206036a",
+  "schema": "sirrobin.economy.reactions.v1"
+}
