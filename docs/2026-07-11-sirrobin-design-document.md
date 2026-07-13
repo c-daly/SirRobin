@@ -7,7 +7,10 @@
 > S0. The consolidated S1 conserved-nutrient plan governs S1 and supersedes older float-ledger, reservoir,
 > energy, parcel-timing, and package-layering prose below. S0 is complete: the original 1,000/90M gate remains
 > NO-GO and the pre-registered 5,000/10,000 population gate is GO. S1 is also implemented and records GO in
-> `docs/superpowers/reports/2026-07-12-sirrobin-S1-decision-report.md`; S2 is next.
+> `docs/superpowers/reports/2026-07-12-sirrobin-S1-decision-report.md`; S2 is implemented but records NO-GO on
+> controller falsifier F12, despite green canonical mechanics and CUDA throughput.
+> The S2 canonical-body/live-locomotion plan governs S2 and supersedes older coordinate, tail-direction,
+> metabolic-debit, action-validation, capacity, and throughput statements in this document.
 
 ---
 
@@ -43,7 +46,10 @@ The agent couples to the sim through a **Talos** hardware-abstraction layer (HAL
 **Embodiment is deferred to slice S8**, but the seam is kept open from day one as a hard architectural constraint:
 
 - The canonical population layout — struct-of-arrays torch tensors shaped `(W, N_cap, k)` with a boolean alive-mask (§2.4) — **is** the batched observation tensor the Talos contract exposes. There is no separate "RL representation" to build later.
-- The **CORE action** is the 2-vector `{surge_effort ∈ [-1,1], yaw_rate ∈ [-1,1]}` — the differential-drive-executable intersection of a fish and a TurtleBot3 — and it is *validated by the physics, not merely asserted*: the locomotion kernel integrates yaw only and zeroes vertical COM velocity, so `{surge, yaw}` **is the fish's actually-realized degrees of freedom** (§4.4, §7.4).
+- The design-target **CORE action** is the 2-vector `{surge_effort ∈ [-1,1], yaw_rate ∈ [-1,1]}` — the
+  differential-drive-executable intersection of a fish and a TurtleBot3. S2 can establish the realized physical
+  DOF `{surge,yaw}`, but its donor-shaped heading controller does not validate the normalized action mapping.
+  Talos/Sophia action conformance remains an explicit S8 gate (§4.4, §7.4).
 - **Behavior in the evolving population is reactive** (hardwired drives / gradient-following) for all of S0–S7. Evolved neural "minds" are out of scope until the body and ecology are faithful. Consequence: the genome is **body-only**, and PyTorch is used as a pure vectorized array engine (`inference_mode`/`no_grad` in the hot loop, no autograd).
 
 Nothing in S0–S7 may require Sophia to exist; nothing in S0–S7 may make Sophia impossible to attach at S8.
@@ -319,6 +325,10 @@ trivially first, so the generator climbs without downstream change (P4/P6).
 
 World frame is ENU-consistent SI: **x east, y north, z up**, metres, seconds, radians, kelvin. Surface `z = 0`; seafloor `z = −H(x,y)`, `H > 0` = depth. The horizontal domain is a **periodic box** of side `L` (wrap-around in x and y). Positions are `float32` in the hot loop.
 
+**S0/S2 frame boundary.** S0 is intentionally frozen in the donor's Unity-native XZ-horizontal/Y-up frame.
+Every new S2 public contract uses this ENU world frame and FLU body frame. A single tested adapter converts donor
+fixtures/genomes at the boundary; donor axes are not the public runtime convention.
+
 Two grids hide under the word "grid"; they are architecturally independent and must never be conflated (this conflation quantized the prior build's biology):
 
 | | **Field grid (Eulerian)** | **Spatial hash** |
@@ -470,11 +480,19 @@ The world does not *cause* the crossing — that emergence is the hard S9 fronti
 
 ### 4.1 Scope, position in the stack, and the one load-bearing invariant
 
-The `physics` package is pure numerics: it consumes articulated bodies (geometry + pose) and fluid/medium samples, and produces **forces, accelerations, and an energy ledger**. It knows nothing of genes, creatures, feeding, or economy — those live upstream and reach physics only through two frozen contracts: the **`DevelopedBody`** (what a body *is*, produced by `genetics`, §5) and the **`MediumSample`** (what the environment *is at a position/time*, produced by `fields`, §3). This is P4 made concrete; the import-linter makes `physics` importing `core`/`fields`-internals a build failure.
+The `physics` package is pure numerics: it consumes articulated bodies (geometry + pose) and physics-owned
+fluid/medium samples, and produces forces, accelerations, and dimensioned work diagnostics. It knows nothing of
+genes, creatures, feeding, or economy. `genetics` produces the **`DevelopedBody`**; the `core` composition root
+samples fields and constructs the physics-owned **`FluidSample`/`MediumSample`**, so sibling `fields` and
+`physics` never import one another. S2 has no closed physical-energy reservoir system and must not call these
+diagnostics total-energy conservation.
 
 The section specifies, in dependency order: (1) the `DevelopedBody` geometry (§4.2); (2) the hydrodynamic force set (§4.3–4.4); (3) the additive-contributor articulated-body core (§4.5–4.7); (4) determinism, energy closure, and oracle validation (§4.8).
 
-**The governing physics invariant (a CI gate, ranked with conservation, P1).** Every force contributor that removes mechanical energy from a body must deposit it into a tracked sink (wake KE, drag dissipation, ground-friction heat), and the per-step algebraic identity `P_in = Σ(useful power) + Σ(dissipated power)` must close to tolerance. Mechanical work is drawn from a creature's metabolic reserve at `ΔE_metabolic = ΔW_mech / (η_muscle·N)` with **η_muscle ≈ 0.20** and the frozen energy anchor **N = 300 J / sim-energy** (§1.2, §4.8). This is the physics-side face of first-law closure.
+**The governing physics invariant.** Hydrodynamic channel identities and dimensioned discrete integrator-work
+residuals close to mixed tolerance. These are work diagnostics, not a closed total-energy system. S2 has no
+creature reserve or heat reservoir and therefore performs no metabolic debit. S3 may introduce
+`ΔE_metabolic = ΔW_mech/(η_muscle*N)` only as one side of a complete reserve-to-work/heat transaction.
 
 ### 4.2 The `DevelopedBody` — the geometry the solver consumes
 
@@ -486,10 +504,10 @@ function; all topology growth happens in `Mutate()` (§5.5), never here, so the 
 | Field | Shape `[S_total, …]` | Units | Meaning |
 |---|---|---|---|
 | `center` | `[S,3]` | m | rest center in body frame |
-| `rest_rot` | `[S,4]` | quat | rest orientation; local +z = long axis |
+| `rest_rot` | `[S,4]` | quat | derived rest orientation in FLU |
 | `local_pos` | `[S,3]` | m | attach offset vs parent |
 | `local_rot` | `[S,4]` | quat | rest local rotation vs parent |
-| `abc` | `[S,3]` | m | ellipsoid semi-axes `(a,b,c)`; `c` = half-length |
+| `semi_axes_flu` | `[S,3]` | m | ellipsoid semi-axes along `(forward,left,up)` |
 | `volume` | `[S]` | m³ | displaced ellipsoid volume `(π/6)(2a)(2b)(2c)` |
 | `mass` | `[S]` | sim-mass | inertial mass `max(0.1, 2a·2b·2c·ρ_gene)` |
 | `area` | `[S,3]` | m² | anisotropic drag reference areas `(areaX,areaY,areaZ)` |
@@ -500,7 +518,7 @@ function; all topology growth happens in `Mutate()` (§5.5), never here, so the 
 | `amp_deg` | `[S]` | deg | joint gait amplitude, clamped to `AmpMax = 58°`; 0 if root |
 | `phase` | `[S]` | rad | gait phase = `−depth·swimWave` |
 | `is_surface` | `[S]` | bool | Surface (thin plate/fin) vs Segment — the **exaptation flip bit** |
-| `is_tail` | `[S]` | bool | posterior-most, largest +z reach |
+| `is_tail` | `[S]` | bool | posterior-most surface reach along FLU `-x` |
 | `has_joint` | `[S]` | bool | `parent_idx ≥ 0` → carries an actuator |
 
 Plus per-body `tail_slot`, `swim_freq`, and `swim_wave`. Per-body reductions (COM, the six unique `M_eff`
@@ -556,8 +574,8 @@ gain0 arm retains the donor's composite-Simpson behavior only for historical con
 ```
 M_eff    = M_body,kg·I₃ + Σ_j R_j·diag(maX,maY,maZ)_j·R_jᵀ # 6 unique entries, masked slot sum
 F_stream = (T_react + T_fin)·f̂ + Σ_j F_drag,j              # + gravity/buoyancy/contact at S9 (§4.5)
-dv_xz = solve(M_eff[xz,xz], (F_stream·Dt)_xz)
-v_xz += dv_xz ; v_y = 0 ; x += v·Dt                          # constrained horizontal solve
+dv_xy = solve(M_eff[xy,xy], (F_stream·Dt)_xy)
+v_xy += dv_xy ; v_z = 0 ; x += v·Dt                          # ENU horizontal solve
 ```
 
 `SolveSym3` is the donor's closed-form symmetric cofactor solve (control op order for the oracle; do **not** dispatch to `linalg.solve`). Momentum-conservation guard (CI): with `Cd=0`, no undulation, an initial drift must coast exactly.
@@ -574,7 +592,10 @@ Population cognition is **reactive** (§1.1); there is no evolved brain in the h
 
 A coherent head→tail phase gradient (`swim_wave` monotone in depth) is a traveling wave → net thrust; a standing/incoherent gait nets ~0 thrust while still shedding wake KE → COT→∞ (selected against, emergently). Steering (S2+, `StepLive`) adds a latched **DC bias** `θ_j += turnCmd·depth_j`; the asymmetric wake produces a *real* yaw torque `τ = Σ r×F`, integrated as **angular momentum** `L_yaw += τ·Dt`, `ω = L_yaw/I_yaw`, with physical quadratic yaw form-drag `τ_drag = −Cyaw·ω·|ω|`, `Cyaw = 0.5·ρ_w·YawCd·Σ_j areaX_j·r_j³` (broadside `YawCd≈1`). The turn *rate* is drag-set physics, not a clamp; `turnCmd` is the only "placeholder brain" seam (a P-controller on heading error), bounded so the biased peak stays within `AmpMax`.
 
-The realized locomotion DOF is **2: {surge, yaw}** — the kernel zeroes vertical COM velocity and integrates yaw only — which is exactly the CORE action contract `{surge_effort, yaw_rate}` shared with the TurtleBot3 (§7.4), making fish↔robot action-transfer risk ≈ 0.
+The realized locomotion DOF is **2: {surge, yaw}** — the S2 kernel zeroes vertical relative velocity and integrates
+yaw only. This is compatible in dimension with the design-target CORE action, but the donor controller consumes a
+desired heading and emits a gait-curvature bias, not a normalized yaw-rate command. S2 therefore does **not**
+validate the Talos/TurtleBot3 action mapping; that remains an S8 interface gate.
 
 ### 4.5 The load-bearing architecture — additive force contributors on one articulated-body core
 
@@ -702,7 +723,9 @@ Struct-of-arrays, fixed capacity, boolean masks. A heterogeneous population is *
 | `edge_mask` | `[P, E_max]` | bool | valid edge |
 | `body_g` | `[P, F_body]` | f32 | body-level genes |
 
-Suggested capacities: `N_max = 24`, `E_max = 48`, `S_max = 32`, developmental depth `L = 6` (pin against the S0/H1 raggedness profile; `S_max` is post-mirror-expansion).
+Frozen S2 capacities: `N_max = 24`, `E_max = 48`, physical `S_max = 16` plus slot-0 sentinel, and
+`MaxDepth = 5`. Development is a fixed 16-emission batched DFS stack scan so donor traversal/cap order is
+preserved; pose is the separate six-pass depth scan.
 
 **`F_node` fields** (`F_node ≈ 13` floats; type/id in `node_type`/`node_iid`):
 
@@ -711,7 +734,7 @@ Suggested capacities: `N_max = 24`, `E_max = 48`, `S_max = 32`, developmental de
 | `log_a, log_b, log_c` | log(m) | ellipsoid semi-axes, **log-scale** → ratio-symmetric mutation; kills the additive-mass ratchet |
 | `density_gene` | sim-mass·m⁻³ | segment structural density; multiply integrated sim-mass by 250 kg/sim-mass exactly once |
 | `port_intake, port_sense` | {0,1} | mouth / chemosensor flags (Sense feeds the reactive drive and the Talos EXT chem sense) |
-| `jFreq, jPhase, jAmp` | Hz, rad, rad | hinge actuation (gait) |
+| `jAmp` | rad | hinge amplitude; the donor's unread per-node `jFreq/jPhase` are not migrated |
 | `hinge_axis (2)` | rad | evolvable hinge axis as two angles (identity default) |
 | `expressed` | {0,1} | neutral-drift toggle: silenced node has zero mass/drag/upkeep, drifts freely, can re-express |
 
@@ -1228,7 +1251,10 @@ CORE is exactly what a differential-drive base can execute, so a CORE-only polic
   - `yaw_rate ∈ [-1, 1]` → `Twist.angular.z`
 - **Obs IN:** `lin_vel(3)`, `ang_vel(3)`, `orientation(4)` (or `heading(1)` in a 2-D profile), `range_egocentric(K)` (robot LaserScan / fish nearest-neighbour+terrain on the same K beams), `flow_rel(3)`, `energy(1)` (fish metabolic reserve / robot battery SoC), `contact`.
 
-**Validated by the crown jewel, not merely asserted compatible.** SwimEval's cruise path **zeroes vertical COM velocity** and `StepLive` **integrates yaw only** (§4.4) — so the 2-DOF `{surge, yaw}` CORE **is the fish's actually-realized locomotion DOF today**, not a lossy down-projection. Heave/pitch/roll belong in EXT precisely because the kernel does not integrate them. ⇒ fish↔robot **action-side transfer risk ≈ 0**; the residual risk is entirely **observation-side** (§7.4.4, open Q #5).
+**Physics-compatible, action mapping unverified.** S2 targets a real horizontal `{surge,yaw}` body, so the
+future CORE action has the right dimensionality. The donor-shaped controller nevertheless consumes desired
+heading and emits gait curvature rather than normalized yaw rate. Fish↔robot action-side transfer remains an S8
+conformance question alongside the observation-side question (§7.4.4, open Q #5).
 
 #### 7.4.3 EXT — sim-only richness, never load-bearing for transfer
 

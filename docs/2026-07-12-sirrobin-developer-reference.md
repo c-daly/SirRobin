@@ -12,6 +12,9 @@ developer-facing API surfaces). It is a **map, not the territory** — the autho
   population-grounded Gate-E revision, and both S0 decision reports are authoritative for S0 acceptance.
 - `docs/superpowers/plans/2026-07-12-sirrobin-S1-conserved-nutrient-implementation-plan.md` is the execution
   authority for S1 and supersedes older S1 reservoir, energy, parcel, and package-layering prose.
+- `docs/superpowers/plans/2026-07-12-sirrobin-S2-canonical-body-live-locomotion-implementation-plan.md` is the
+  active S2 authority and supersedes older S2 coordinate, tail-direction, energy, action, capacity, and
+  throughput prose.
 - `docs/2026-07-11-sirrobin-design-document.md` — the master technical design (cited *design §X*); the source for Parts I–II and the **target** for `[designed]` surfaces not yet coded.
 - `docs/superpowers/specs/2026-07-11-sirrobin-restart-architecture-design.md` and `…-genome-encoding-design.md`.
 - `CLAUDE.md` — the working contract and the nine non-negotiable laws.
@@ -19,7 +22,8 @@ developer-facing API surfaces). It is a **map, not the territory** — the autho
 > **Reading the status tags.** **S0 / "SpikeSwim" is complete under the revised population-grounded gate** —
 > every production module the accepted plan lists exists under `src/sirrobin/`, with a frozen 192-body corpus,
 > both oracle arms, tests, and decision reports. The original 1,000-creature/90M Gate E remains a historical
-> NO-GO; the pre-registered 5,000/10,000-creature replacement is GO. **S1 is implemented and records GO.**
+> NO-GO; the pre-registered 5,000/10,000-creature replacement is GO. **S1 is implemented and records GO. S2 is
+> implemented but records NO-GO on controller falsifier F12.**
 > Surfaces are tagged **[S0]** or **[S1]** (coded now — Part III cites source symbols), **[designed]**
 > (specified in the design doc / plan, no code yet, built in a
 > later slice), or **[frontier]** (a research goal, not solved technique). Parts I–II (premise, architecture)
@@ -267,7 +271,7 @@ is next.
 |---|---|---|
 | **S0** | SpikeSwim — vectorized frozen-heading locomotion; verify the thesis by measurement | **GO under the revised population-grounded gate (original 90M floor = historical NO-GO)** |
 | **S1** | Conserved single-nutrient economy (keystone; books must close) | **complete; GO** |
-| S2 | One canonical body + live locomotion for every creature; the additive-force seam; kill `eff[]` | designed |
+| S2 | One canonical body + live locomotion for every creature; the additive-force seam; prevent `eff[]` | **implemented; NO-GO (F12 controller settlement)** |
 | S3 | Feeding / metabolism / reproduction on conserved energy | designed |
 | S4 | Predation as a staged contest between bodies (no seeded predator) | designed |
 | S5 | Speciation / mating / taxonomy | designed / frontier |
@@ -282,8 +286,10 @@ is next.
 
 **Primary sources: the code (`src/sirrobin/…`, cited `file:line`) and the accepted plan (the consolidated S0
 implementation plan, cited *plan §*).** The design doc is the target only where a later accepted correction or
-slice plan does not supersede it. **S0 and S1 are complete and measured.** Conventions: SI units, ROS
-REP-103 FLU body frame, Unity-order `(x,y,z,w)` quaternions (`numerics/quat.py:1`), radians, seconds. `B` =
+slice plan does not supersede it. **S0 and S1 are complete and measured.** New public contracts use ENU world
+coordinates and ROS REP-103 FLU body coordinates, with Unity-order `(x,y,z,w)` quaternion storage
+(`numerics/quat.py:1`), radians, and seconds. **S0 is a frozen exception:** its donor-conformance tensors retain
+the donor XZ-horizontal/Y-up frame behind the S2 boundary adapter. `B` =
 batch (bodies), `S` = `s_slot` = **17** (slot-0 sentinel + 16 real segments).
 
 ## III.1 Actual module layout & the import firewall
@@ -406,7 +412,8 @@ nonnegative wake power actually dissipated (`u≥0` only), matching the donor's 
 
 ## III.5 `physics` API
 
-- **`lamb`** — ellipsoid added mass by pinned 256-pt Gauss–Legendre: `lamb_coefficients(abc)` (sum scaled to
+- **`numerics.ellipsoid_added_mass` / `physics.lamb` compatibility API** — ellipsoid added mass by pinned
+  256-pt Gauss–Legendre: `lamb_coefficients(abc)` (sum scaled to
   exactly 2), `lamb_factors` (`α/(2−α)`), `added_mass(abc, rho_water)` = `factor·ρ·V`, `V=(4/3)π·abc.prod`
   (`lamb.py:14-42`). `donor_lamb_factors`/`donor_added_mass` = the gain0 Simpson-2048 arm.
 - **`pose`** — `resolve_pose(body, time_s, *, apply_gait=True) -> Pose` (`pose.py:19`): gait flex
@@ -525,19 +532,46 @@ The authorizing results are exact closure over a one-million-step production soa
 is fastest at a median 109.1 ecology steps/s with about 38 MiB peak allocation. These results authorize the
 material cycle only—not grazing, self-shading, burial, a complete biological pump, or creature energy.
 
-## III.9 Not yet built — `[designed]` (the design doc is the target)
+## III.9 S2 canonical body and live-locomotion API (implemented; NO-GO)
+
+- **`GenotypeBatch`** (`genetics/genotype.py`) — fixed `[W,N,24]` node and `[W,N,48]` edge tensors with stable
+  IDs, expression/type/axes/density/port/joint fields, attach/rotation/scale/mirror/recursion edges, and swim
+  frequency/wave genes. `validate()` enforces the fixed capacities, live root, innovation IDs, endpoints, and
+  finite geometry. `from_donor_rows` is fixture ingestion, not the hot development path.
+- **`develop(genotype) -> DevelopedBody`** (`genetics/develop.py`) — fixed 16-emission batched DFS stack scan,
+  deterministic positive-then-mirror ordering, depth ≤5, axial-vector hinge reflection, ellipsoid mass/areas,
+  GL256 Lamb added mass, and aft local-`−x` tail selection. Output is immutable `[W,N,17,...]`; slot 0 is the
+  sentinel. Development imports `physics.contracts` only; import-linter forbids physics implementation imports.
+- **Canonical contracts** (`physics/contracts.py`) — `DevelopedBody`, `FluidSample`, `ForceTorquePower`,
+  `HydrodynamicDiagnostics`, `LiveState`, and `LiveStepLedger`. `LiveState` stores ENU COM position, water-relative
+  velocity, yaw, yaw angular momentum, f64 gait time, desired heading, gait turn bias, and heading-latch state.
+  It deliberately stores no angular velocity, heading quaternion, cached speed, or capability score.
+- **Live mechanics** — `resolve_live_pose` performs the fixed FLU depth scan; `hydrodynamic_contribution` assembles
+  reactive tail thrust, surface-fin lift, axial segment drag, force moments, `M_eff`, pose-dependent yaw inertia,
+  and quadratic yaw drag in ENU; `sum_contributions` provides the typed additive seam. `step_live` solves ENU x/y,
+  integrates linear velocity plus `L_yaw`, derives `omega=L/I`, wraps yaw, and emits exact linear/angular
+  discrete-work ledgers. The 8 rad/s value is an async assertion, never a clamp.
+- **Core composition** — `update_heading_controller` implements the frozen donor-shaped desired-heading policy;
+  `advance_live_world` composes controller → physics → passive uniform-current transport → periodic x/y wrapping,
+  while leaving depth unchanged. `save_live_snapshot/load_live_snapshot` stores genotype plus every live-state
+  field and re-develops the body; `DevelopedBody` is never serialized as a second authority.
+- **Morphology** — `query_morphology` derives segment count, structural mass, displaced volume, projected areas,
+  and intake-face area from the canonical axes. Intake flags do not switch hydrodynamics.
+- **Measurement** — `benchmarks.live` supports eager, compile, and safe CUDA Graph rungs over literal H1/H2
+  cycles at 5,000/10,000. CUDA Graph clears every hard floor with zero intervention, but CPU/eager CUDA do not.
+  The decision remains **NO-GO** because the strict CPU and CUDA F12 tests prove the heading controller does not
+  home and settle. See `docs/superpowers/reports/2026-07-12-sirrobin-S2-decision-report.md`.
+
+## III.10 Not yet built — `[designed]` (the design doc is the target)
 
 These are in Parts I–II and the design doc but have **no code** yet; a later slice builds them. Do not treat
 their signatures as final.
 
 - **`Colony` / Environment API** (`reset/step/state/load`) — the top-level driver; S0 drives via `SwimKernel`
   and S1 via `EconomyKernel`; whole-tick composition remains later. **[designed, S2+]**
-- **`ForceContributor` Protocol** — the additive-force seam (`F_total = F_hydro + F_gravity + F_buoyancy +
-  F_contact`, summed-never-switched, medium decides dominance — what makes water↔land free); S0 calls the three
-  channels directly in `SwimKernel` (design §4.5). **[designed, S2]**
-- **`genetics` (`develop`, genotype tensors, mutation/crossover/distance/mating)** — S0 uses hand-authored
-  corpus bodies, not genome development; innovation-id alignment enables emergent speciation `[frontier]`
-  (design §5). **[designed, S2+]**
+- **Later genetics** — mutation, crossover, compatibility distance, mating, and the shared innovation registry
+  remain unimplemented. S2 lands genotype storage and development only; emergent speciation remains a frontier.
+  **[designed, S3/S5]**
 - **Later abiotic fields** — geology, structural `Φ`, currents, temperature, terrain, and the core adapter from
   generic `FieldSample` to physics-owned `MediumSample`. S1 implements only conserved nutrient/biomass grids,
   analytic light, and prescribed vertical transport. **[designed, S2/S6/later]**
@@ -549,6 +583,8 @@ their signatures as final.
   live yaw (`StepLive`) is an **S2** performance-and-fidelity risk, and the claim that a CORE-only policy
   transfers to a TurtleBot3 unchanged is **unverified**. `core/contracts.py` currently holds only
   `ArtifactRef{path, sha256}` (design §7.4). **[designed, S8]**
+- **Creature energy coupling** — S2 emits hydrodynamic and discrete-work diagnostics only. It has no reserve/heat
+  reservoirs and performs no metabolic debit; the complete transaction begins in S3. **[designed, S3]**
 - **`rng` (Philox), full `Colony` snapshot** — S1 has an exact economy snapshot, but no biological sampler or
   composed world/creature snapshot yet. **[designed, S3/later]**
 
@@ -557,7 +593,8 @@ their signatures as final.
 *Maintenance: Part III is grounded in the code (`file:line`) plus the accepted slice authorities — the
 consolidated S0 plan, the population-grounded **Gate-E revision**
 (`docs/archive/plans/2026-07-12-sirrobin-locomotion-gate-E-revision.md`), the **S1 conserved-nutrient
-implementation plan**, and both slice decision reports (reflecting S0 and S1 GO as of 2026-07-12). **This is a
+implementation plan**, the **S2 canonical-body/live-locomotion plan**, and the S0/S1/S2 decision reports
+(reflecting S0/S1 GO and S2 NO-GO as of 2026-07-12). **This is a
 living document: keep it current as the code and slices land — update it with the code, don't let it fall
 behind.** Exact line numbers are **navigational, not stable API identifiers**: they will drift and small
 surfaces (e.g. `StepLedger` fields) may change between edits, so re-verify against `src/` before relying on a

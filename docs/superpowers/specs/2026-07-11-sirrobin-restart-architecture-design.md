@@ -8,6 +8,11 @@ evidence-grounded architecture.
 **Grounding:** verified against real prior art (Isaac Gym/Lab, Brax, MuJoCo-MJX, NVIDIA Warp) and
 against the actual donor source `…/game prototype/Assets/ProceduralWorld/Scripts/Life/SwimEval.cs`.
 
+> **2026-07-12 S2 amendment.** The S2 canonical-body/live-locomotion plan supersedes this draft's total package
+> chain, global coordinate assumption, `StepLive` action-validation claim, S2 metabolic debit, and historical
+> throughput framing. Public S2 state is ENU/FLU; S0 remains donor-native behind an adapter; core constructs
+> physics-owned fluid samples from sibling fields; and S2 work is diagnostic until S3 creates real reservoirs.
+
 ---
 
 ## 1. North star & principles (recap — see brief for full)
@@ -58,11 +63,10 @@ the GPU determinism tax, and float32 long-run energy drift.
   *(Honest note: single-thread compiled throughput is ~5× realtime at ~1000 creatures — the earlier
   "100–1000×" claim was wrong by ~2 orders of magnitude; performance is first-order for deep-time
   evolution, which is exactly why GPU-vectorization is justified for a large single world.)*
-- **Layering as Python packages with an enforced import-boundary firewall** (replaces the compile
-  firewall): `numerics → physics → fields → genetics → core → observe`, with Unity as a downstream
-  viewer. A lint rule (e.g. `import-linter`) makes "physics imports ecology" a CI failure. `physics`
-  defines mechanical contracts (`DevelopedBody`, `FluidSample`); `genetics` produces bodies, `fields`
-  produce fluid samples; neither reaches into `physics` internals.
+- **Layering as capability siblings with an import-boundary firewall:** `physics`, `fields`, and `genetics`
+  sit over `numerics`; `economy` consumes public `fields`; future `core` composes public sibling contracts;
+  `observe` reads public state. `physics` owns `DevelopedBody` and `FluidSample`, `genetics` produces bodies,
+  and core samples fields to construct fluid input. Neither fields nor physics imports the other.
 - **Unity = remote/replay viewer** over the same state contract Talos uses; it no longer compiles or
   hosts the sim. (This box's Unity-first CLAUDE.md assumption is now void for the Core.)
 - **Distributed/cluster is first-class:** Core is pure Python/torch (runs on any CPU/GPU node);
@@ -121,12 +125,9 @@ ext_present}.
   same K beams (the fish's *primary* nav sense, deliberately EXT because it has no robot analogue),
   light/depth/temp/marine-snow, per-segment proprioception, gape, heave/pitch/gait actions, feeding
   strike. robot — camera, IMU, wheel ticks, joint states.
-- **Validated by the crown jewel, not merely compatible:** SwimEval's cruise path already zeroes
-  vertical COM velocity (`Sim.Step` line 807) and `StepLive` integrates yaw only (line 956) — so the
-  2-DOF {surge, heading} CORE **is the fish's actual realized locomotion DOF today**, not a lossy
-  down-projection. Heave/pitch/roll belong in EXT precisely because the kernel doesn't integrate them.
-  → fish↔robot **action-side** transfer risk ≈ 0; the residual risk is entirely **observation-side**
-  (can a CORE-only, chem-gradient-free policy forage — see open Q).
+- **Physics compatibility, not action validation:** S2 can prove that the live body realizes only horizontal
+  surge and yaw. The donor motor seam consumes desired heading and emits gait curvature, not normalized yaw rate,
+  so fish↔robot action transfer remains unverified until the real Talos/Sophia interface is tested in S8.
 - **Serialization:** in-process (Sophia in same Python) → pass torch tensor dicts directly (zero
   serialization), pydantic shape/dtype check in debug only. At a process/network boundary → canonical
   IDL is **Protobuf proto3** (field-number evolution, additive-only within a major; `reserved` for
@@ -180,14 +181,13 @@ code inspection.
 
 ## 7. Slice roadmap (revised)
 
-- **S0 — SpikeSwim** (above): verify the vectorization thesis. Go/no-go with measured gates.
+- **S0 — SpikeSwim** (complete): original 90M gate NO-GO; population-grounded 5k/10k gate GO.
 - **S1 — Conserved single-nutrient economy** (keystone): closed loop (Liebig×Monod drawdown,
   bacterial remineralization BGE split, Martin profile, mixing). *Books must close* to tolerance;
-  blooms/deserts emerge from the loop. Nothing proceeds until green.
-- **S2 — One canonical body + live locomotion for every creature:** `BodyGraph → DevelopedBody →`
-  **`Sim.StepLive`** (yaw-integrating P-controller — the *actual* live loop, heavier than the `Step`
-  S0 ports; **re-measure throughput against StepLive before committing**). Feeding/metabolism/defense
-  derived from morphology (kill the `eff[]` vector).
+  blooms/deserts emerge from the loop. **Complete; GO.**
+- **S2 — One canonical body + live locomotion for every creature (implemented; NO-GO on F12):** fixed-capacity
+  innovation-marked genotype → immutable `DevelopedBody` → ENU/FLU additive hydrodynamics with real
+  angular-momentum yaw. Re-measure H1/H2 at 5,000 and 10,000; no stat vector and no metabolic debit.
 - **S3 — Feeding/metabolism/reproduction on conserved energy** (Holling-II + assimilation loss →
   detritus; Kleiber; real construction cost).
 - **S4 — Predation as a staged contest between bodies** (find→close→seize→consume; conserved; no

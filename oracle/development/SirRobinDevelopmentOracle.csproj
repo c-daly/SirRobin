@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../UnityEngineShim.cs" Link="UnityEngineShim.cs" />
+    <Compile Include="/mnt/c/Users/cddal/game prototype/Assets/ProceduralWorld/Scripts/Life/MutationNoise.cs"
+             Link="Donor/MutationNoise.cs" />
+    <Compile Include="/mnt/c/Users/cddal/game prototype/Assets/ProceduralWorld/Scripts/Life/BodyGraph.cs"
+             Link="Donor/BodyGraph.cs" />
+    <Compile Include="/mnt/c/Users/cddal/game prototype/Assets/ProceduralWorld/Scripts/Life/SwimEval.cs"
+             Link="Donor/SwimEval.cs" />
+  </ItemGroup>
+</Project>

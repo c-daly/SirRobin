@@ -1,0 +1,35 @@
+{
+  "schema": "sirrobin.development-live.fixture-manifest.v1",
+  "fixtures": {
+    "donor_development_live.json": "ea1c957beea9de9404e661aedc3d8bc2dc838d992b64716e010b2e0ad1da3bf1",
+    "gain1_canonical.json": "05fbdf0285a78fabe6b9b8e406409a574feae0da934dc6bd420c9d952446da44",
+    "corpus.json": "4bfb1c5a386c61290bf1d9cbcfa0cbd4f04b6d5294d7e3c42a00a41f51d38463"
+  },
+  "generators": {
+    "oracle/development/Program.cs": "88f0c0a7ee5418b8e24eadb35af30e760a5c36a73b90a277741004b90dbfd92a",
+    "oracle/development/CompileShims.cs": "c13f71fa1c4eb69ab2d11e5a1410e89041bef0e4b5d1d092c838ff750e077bc4",
+    "oracle/development/SirRobinDevelopmentOracle.csproj": "1a86006005790dad0b5b95c1f812ae933b71507beb7264a374f8bc4d86fcc46e",
+    "tools/live_oracle.py": "1d568009fcd4f93622acc126ce15b6cba5e4a5842ee7eaa9d6ad66aeaf5e43d6",
+    "oracle/UnityEngineShim.cs": "0b8ee40c297fbc1d725057749ad4476ef94a83e24b78093e9708aae1f3440693"
+  },
+  "donor_sources": {
+    "BodyGraph.cs": "92256185bf96074e1c8ed1347032d67e199df195ada4996828bc1709a8f756f9",
+    "SwimEval.cs": "b42b199631fb251436b4f516478f37c3bea2cbf52130e3ba86d79224d28e1e67",
+    "MutationNoise.cs": "5d76e90f08399b8b4295b170c1976c4aacf7955adf6492d0f5cde0f6502ee7dc"
+  },
+  "corpora": {
+    "D0": {
+      "count": 32,
+      "purpose": "donor development, mirror, cap, controller, and live-trace conformance"
+    },
+    "A1": {
+      "count": 32,
+      "purpose": "independent canonical-frame ellipsoid, tail-aft, inertia, and yaw corroboration"
+    },
+    "H1/H2": {
+      "count": 2,
+      "purpose": "literal heterogeneous and skewed replication cycles for 5,000/10,000 authorization"
+    }
+  },
+  "policy": "Donor and analytic expected values were committed before production S2 code. The H2 cycle was corrected before any throughput measurement to enforce its already-frozen 2-16 segment definition. Tests may read but never regenerate expected values."
+}

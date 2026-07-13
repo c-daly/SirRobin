@@ -10,12 +10,15 @@ purpose is a grounding substrate for an embodied agent (Sophia), deferred until 
 - `docs/2026-07-11-sirrobin-design-document.md` — the master technical design.
 - `docs/2026-07-11-sirrobin-overview.md` — the short vision.
 - `docs/superpowers/specs/2026-07-11-sirrobin-restart-architecture-design.md` and `…-genome-encoding-design.md`.
+- `docs/superpowers/plans/2026-07-12-sirrobin-S2-canonical-body-live-locomotion-implementation-plan.md`
+  — the S2 execution authority; its 2026-07-12 run records NO-GO on controller falsifier F12.
 - The file-based memory (`…/.claude/projects/…/memory/`, auto-loaded via `MEMORY.md`) — the running decision record.
 
 **Current state:** **S0 / "SpikeSwim" is implemented and verified.** The original 1,000-creature/90M Gate E
 remains a recorded NO-GO; the subsequently pre-registered population-grounded gate records GO at 5,000 and
-10,000 creatures. **S1 is implemented and records GO** for the exact four-reservoir nutrient cycle; S2 is the
-next execution programme. Build depth-first from there.
+10,000 creatures. **S1 is implemented and records GO** for the exact four-reservoir nutrient cycle. **S2 is
+implemented but records NO-GO**: mechanics and CUDA throughput pass, while the frozen desired-heading controller
+fails F12 (home-and-settle). Do not begin S3 until a successor controller authority closes Gate C.
 
 ## Environment (this documents decisions that diverge from the global `~/.claude/CLAUDE.md`)
 
@@ -29,6 +32,9 @@ the simulation lives.
   ship disabled behind `gain=0` dials.) Conserved reservoir state is exact int64 fixed-point quanta; float64
   is used for independent rate/oracle work and float32 for hot mechanical state. There is no float mirror of a
   conserved reservoir.
+- **Coordinates:** public world state is ENU (`x` east, `y` north, `z` up; water `z<0`) and new body contracts
+  are FLU (`x` forward, `y` left, `z` up). S0 remains a frozen donor-native XZ/Y-up validation experiment;
+  conversions belong in one tested boundary adapter, never inline swaps.
 - **PowerShell is 5.1:** when reading/writing files other tools will read, handle UTF-8 explicitly
   (`[System.IO.File]::ReadAllText/WriteAllText` with a UTF-8 encoding) — the default codepage corrupts
   non-ASCII (em-dashes, arrows) into mojibake.

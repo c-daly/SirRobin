@@ -163,3 +163,120 @@ class StepLedger:
     work_impulse: torch.Tensor
     work_delta_m: torch.Tensor
     r_step: torch.Tensor
+
+
+@dataclass(frozen=True, slots=True)
+class DevelopedBody:
+    """Immutable genotype-derived physical geometry in canonical FLU coordinates."""
+
+    alive: torch.Tensor
+    stable_id: torch.Tensor
+    seg_mask: torch.Tensor
+    parent: torch.Tensor
+    depth: torch.Tensor
+    local_pos_flu_m: torch.Tensor
+    local_rot_flu: torch.Tensor
+    semi_axes_flu_m: torch.Tensor
+    density_gene: torch.Tensor
+    mass_sim: torch.Tensor
+    volume_m3: torch.Tensor
+    drag_area_flu_m2: torch.Tensor
+    added_mass_flu_kg: torch.Tensor
+    fin_perpendicular_kg: torch.Tensor
+    is_surface: torch.Tensor
+    intake: torch.Tensor
+    sense: torch.Tensor
+    joint_amp_rad: torch.Tensor
+    hinge_axis_flu: torch.Tensor
+    phase_rad: torch.Tensor
+    tail_slot: torch.Tensor
+    swim_freq_hz: torch.Tensor
+    swim_wave_rad_per_depth: torch.Tensor
+    truncated_candidate_count: torch.Tensor
+
+    @property
+    def worlds(self) -> int:
+        return int(self.alive.shape[0])
+
+    @property
+    def capacity(self) -> int:
+        return int(self.alive.shape[1])
+
+    @property
+    def batch_size(self) -> int:
+        return self.worlds * self.capacity
+
+
+@dataclass(frozen=True, slots=True)
+class FluidSample:
+    density_kg_m3: torch.Tensor
+    velocity_enu_m_s: torch.Tensor
+
+
+@dataclass(frozen=True, slots=True)
+class ForceTorquePower:
+    force_enu_n: torch.Tensor
+    torque_yaw_nm: torch.Tensor
+    input_power_w: torch.Tensor
+    dissipated_power_w: torch.Tensor
+
+
+@dataclass(frozen=True, slots=True)
+class HydrodynamicDiagnostics:
+    u_m_s: torch.Tensor
+    vt_m_s: torch.Tensor
+    tail_slope: torch.Tensor
+    reactive_thrust_n: torch.Tensor
+    reactive_input_power_w: torch.Tensor
+    wake_power_w: torch.Tensor
+    wake_dissipated_power_w: torch.Tensor
+    fin_thrust_n: torch.Tensor
+    fin_input_power_w: torch.Tensor
+    fin_dissipated_power_w: torch.Tensor
+    drag_force_enu_n: torch.Tensor
+    drag_dissipated_power_w: torch.Tensor
+    effective_mass_before_kg: torch.Tensor
+    effective_mass_after_kg: torch.Tensor
+    yaw_inertia_before_kg_m2: torch.Tensor
+    yaw_inertia_after_kg_m2: torch.Tensor
+    yaw_drag_coefficient: torch.Tensor
+
+
+@dataclass(frozen=True, slots=True)
+class HydrodynamicResult:
+    contribution: ForceTorquePower
+    diagnostics: HydrodynamicDiagnostics
+
+
+@dataclass(frozen=True, slots=True)
+class LiveStepLedger:
+    hydrodynamics: HydrodynamicDiagnostics
+    total: ForceTorquePower
+    effective_mass_before_kg: torch.Tensor
+    effective_mass_after_kg: torch.Tensor
+    velocity_delta_m_s: torch.Tensor
+    regularization_impulse_ns: torch.Tensor
+    solve_regularized: torch.Tensor
+    yaw_inertia_floor_hit: torch.Tensor
+    omega_backstop_hit: torch.Tensor
+    nonfinite: torch.Tensor
+    delta_ke_linear_j: torch.Tensor
+    work_impulse_linear_j: torch.Tensor
+    work_delta_mass_linear_j: torch.Tensor
+    residual_linear_j: torch.Tensor
+    delta_ke_rot_j: torch.Tensor
+    work_impulse_rot_j: torch.Tensor
+    work_delta_inertia_rot_j: torch.Tensor
+    residual_rot_j: torch.Tensor
+
+
+@dataclass(slots=True)
+class LiveState:
+    position_enu_m: torch.Tensor
+    velocity_rel_water_enu_m_s: torch.Tensor
+    yaw_rad: torch.Tensor
+    yaw_momentum_kg_m2_s: torch.Tensor
+    gait_time_s: torch.Tensor
+    desired_heading_enu: torch.Tensor
+    turn_bias_rad_per_depth: torch.Tensor
+    heading_initialized: torch.Tensor

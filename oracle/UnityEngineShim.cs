@@ -83,14 +83,18 @@ namespace UnityEngine
         public static float Asin(float x)=>MathF.Asin(x);
         public static float Atan2(float y,float x)=>MathF.Atan2(y,x);
         public static float Clamp(float x,float a,float b)=>Math.Clamp(x,a,b);
+        public static float Clamp01(float x)=>Math.Clamp(x,0f,1f);
+        public static float Exp(float x)=>MathF.Exp(x);
+        public static float InverseLerp(float a,float b,float x)
+            => a==b?0f:Clamp01((x-a)/(b-a));
         public static float Lerp(float a,float b,float t)=>a+(b-a)*t;
         public static float Max(float a,float b)=>MathF.Max(a,b);
         public static int Max(int a,int b)=>Math.Max(a,b);
         public static float MoveTowards(float current,float target,float maxDelta)
             => MathF.Abs(target-current)<=maxDelta?target:current+MathF.Sign(target-current)*maxDelta;
         public static int RoundToInt(float x)=>(int)MathF.Round(x,MidpointRounding.AwayFromZero);
+        public static float Repeat(float x,float length)=>x-MathF.Floor(x/length)*length;
         public static float Sin(float x)=>MathF.Sin(x);
         public static float Sqrt(float x)=>MathF.Sqrt(x);
     }
 }
-
