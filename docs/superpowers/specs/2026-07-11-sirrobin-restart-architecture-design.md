@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-11
 **Status:** Design draft for user review. Supersedes the substrate/skeleton parts (Sections 4–5) of
-`docs/2026-07-11-restart-brief.md`. The north star, fatal-flaw diagnosis, and salvage *intent* in
+`docs/archive/2026-07-11-restart-brief.md`. The north star, fatal-flaw diagnosis, and salvage *intent* in
 that brief still stand; this doc replaces the *how* (C#/Unity → Python/PyTorch) with an
 evidence-grounded architecture.
 **Grounding:** verified against real prior art (Isaac Gym/Lab, Brax, MuJoCo-MJX, NVIDIA Warp) and
@@ -152,17 +152,17 @@ Plus a **10^5-step** config for energy-ledger drift. Plus a **population-churn s
   masking and lifecycle cost. Two dtype configs: **float64** (oracle-match, isolates math
 correctness) and **float32** (throughput/invariant).
 
-**Scale sweep:** staged batches on CPU and CUDA, including the authorizing `N_cap=1024`, `N_live=1000`; heterogeneity
+**Scale sweep:** staged batches on CPU and CUDA. The original experiment used `N_cap=1024`, `N_live=1000`; heterogeneity
 **H0** (homogeneous 6-seg — isolates vectorization), **H1** (realistic ragged 2..16, mean ~6, mirror
 pairs, ~40% fin tails), **H2** (skewed worst-case: mostly 2–3 seg + rare 16). Acceleration ladder:
-r0 eager → r1 `torch.compile(reduce-overhead)` → r2 explicit CUDA-graph capture. **Realtime-affordability
-floor:** **9.0e7 creature-steps/s** separately for H1 and H2 at the authorizing population. The later
-whole-tick floor is 2.31e7 and belongs to G-E2E, not S0.
+r0 eager → r1 `torch.compile(reduce-overhead)` → r2 explicit CUDA-graph capture. The original **9.0e7
+creature-steps/s** floor at 1,000 live remains a recorded NO-GO. The later pre-registered population gate used
+5,000/10,000 live creatures with 1× real-time floors of 600k/1.2M; all H1/H2 cells passed. Whole-tick
+affordability remains later authority.
 
 **Acceptance authority:** the A–E matrix, equations, mixed tolerances, frozen H0/H1/H2 corpus, executable
-100,000-step prefix budget, `N_cap=1024`/`N_live=1000`, 11 GiB VRAM cap, `9.0e7` locomotion floor, and
-GO/CONDITIONAL GO/NO-GO decision classes are normative in
-`docs/superpowers/plans/2026-07-12-sirrobin-S0-consolidated-implementation-plan.md`. Exact int64 bookkeeping
+100,000-step prefix budget, 11 GiB VRAM cap, and decision history are normative in the archived consolidated S0
+plan, the population-grounded Gate-E revision, and both S0 reports. Exact int64 bookkeeping
 and discrete schedules are hard determinism gates; bit-identical floating replay is an informational
 same-device diagnostic. H0 never authorizes.
 
@@ -214,8 +214,8 @@ oracle values** are the durable salvage; the C# text does not run in SirRobin.
 See the grounding brief; the load-bearing ones: **F1 ragged batching** (measure H0/H1/H2 taxes on fixed slots,
 then profile); **F3 launch overhead**
 (acceleration ladder; narrow GPU to many-worlds if r2 fails); **F4 determinism tax** (CPU-first;
-deterministic segment reductions); **F6 float32 drift** (separate float64 ledger; gate on bounded
-drift); **F7 churn cost** (fixed-cap in-place recycling, measured); **C#→torch port bugs the
+deterministic segment reductions); **F6 float32 mechanical drift** (dimensioned residual/prefix gates;
+conserved mass reservoirs use exact int64 closure, not a float ledger); **F7 churn cost** (fixed-cap in-place recycling, measured); **C#→torch port bugs the
 algebraic identity won't catch** (conformance fixtures are the real guard); **Sophia interface unknown**
 (keep contract continuous-first; push any symbolic decode into a Talos-side adapter, never the sim
 schema; don't build S8 until verified).

@@ -2,7 +2,7 @@
 
 **Decision:** **GO**
 **Date:** 2026-07-12
-**Authority:** `docs/superpowers/plans/2026-07-12-sirrobin-locomotion-gate-E-revision.md`
+**Authority:** `docs/archive/plans/2026-07-12-sirrobin-locomotion-gate-E-revision.md`
 **Corpus SHA-256:** `6721211db0aa42c3f63e4364f6f84c948a1f9157af6e02bb35325f09fab5e96e`
 **Hardware:** NVIDIA GeForce RTX 5070, 12,227 MiB physical VRAM, PyTorch 2.13.0+cu130
 
