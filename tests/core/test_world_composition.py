@@ -102,8 +102,36 @@ def test_composed_world_advances_both_clocks_and_closes_its_books_without_unity(
         assert torch.isfinite(world.live_state.velocity_rel_water_enu_m_s).all()
         assert torch.isfinite(world.live_state.yaw_rad).all()
 
-    # The shipped cadence is stated rather than hidden behind the cheap fixture.
+    # The shipped cadence is stated rather than hidden behind the cheap fixture. The
+    # literal is asserted deliberately: comparing against the implementation's own
+    # formula moves with it, and a halved dt_eco_s would pass unnoticed.
     assert substeps == 12
-    assert WorldSchedule.from_configs(
-        LiveLocomotionConfig(), EconomyConfig()
-    ).mechanics_steps_per_economy_step == round(EconomyConfig().dt_eco_s / LiveLocomotionConfig().dt)
+    assert (
+        WorldSchedule.from_configs(
+            LiveLocomotionConfig(), EconomyConfig()
+        ).mechanics_steps_per_economy_step
+        == 1_036_800
+    )
+
+    # Negative control: the mechanics sub-clock cannot silently drift from the
+    # authoritative ecological clock. Stepping mechanics outside advance() is the way
+    # that happens; without this, deleting the guard leaves the suite green.
+    drifted = HeadlessRunner(_world())
+    drifted.advance()
+    for _ in range(substeps):
+        drifted.world._step_mechanics()
+    with pytest.raises(RuntimeError, match="desynchronised"):
+        drifted.advance()
+
+    # Negative control: closure is ENFORCED by the tick, not merely reported. Without
+    # this, deleting the guard in advance() leaves the suite green.
+    world.economy_state.nd_q[..., 0] += 1  # minted outside every transfer
+    with pytest.raises(RuntimeError, match="books do not close"):
+        runner.advance()
+
+    # ...and the failure arrests the world rather than letting it keep advancing its
+    # clocks behind a stream of exceptions.
+    arrested_at = world.sim_time_s
+    with pytest.raises(RuntimeError, match="not resumable"):
+        runner.advance()
+    assert world.sim_time_s == arrested_at
