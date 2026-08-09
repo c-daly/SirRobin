@@ -1,12 +1,10 @@
 """Headless multi-rate schedule.
 
-Per plan section 4.3 this module owns the explicit cadence in simulation time. Tranche
-A composes two rates: live mechanics at the frozen locomotion dt, and the existing
-ecological reaction/transport kernel at its own interval. Feeding, animal metabolism,
-and snapshot/telemetry cadences join this schedule in Tranche C/D/E; they are absent
-because their mechanisms do not exist yet, not because they run at the mechanics rate.
-
-All cadences are configuration data. No cadence depends on a render frame.
+This module owns explicit cadence in simulation time. Canonical mechanics remains
+defined at the frozen locomotion dt. A uniformly validated periodic clone orbit may
+cover repeated canonical steps by rigid-transform composition; every ineligible or
+nonrecurrent state executes all full steps. The ecological reaction/transport kernel
+runs at its own interval. No cadence depends on a render frame.
 
 Per plan section 4.2 the complete tick verifies: advance() raises on a tick whose books
 do not close, naming the worlds that failed, rather than reporting closure as a flag no
@@ -17,6 +15,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import torch
+
+from sirrobin.core.periodic_motion import (
+    PeriodicErrorEstimate,
+    PeriodicMotionPolicy,
+    advance_mechanics_interval,
+)
 from sirrobin.core.world import HeadlessWorld
 from sirrobin.economy.config import EconomyConfig
 from sirrobin.economy.contracts import EconomyStepLedger
@@ -49,23 +54,34 @@ class WorldSchedule:
 class WorldTick:
     """What one composed economy interval did. Observation only; owns no state.
 
-    `economy` covers the whole interval. `last_mechanics_substep` is the final substep
-    only — the runner does not aggregate per-substep mechanics. Per-interval mechanical
-    work and fault counts are Tranche B/D work, since nothing consumes them yet.
+    `economy` covers the whole interval. `last_mechanics_substep` is the final canonical
+    substep only. `mechanical_work_j` integrates named dissipated power across actual
+    and verified repeated cycles; it is observation, not yet a creature-energy debit.
     """
 
     mechanics_steps: int
+    full_batch_mechanics_steps: int
+    representative_mechanics_steps: int
+    fast_forwarded_mechanics_steps: int
     sim_time_s: float
     economy: EconomyStepLedger
     last_mechanics_substep: LiveStepLedger
+    mechanical_work_j: torch.Tensor
+    periodic_error: PeriodicErrorEstimate | None
 
 
 class HeadlessRunner:
     """Drives a `HeadlessWorld` on the declared schedule. Owns cadence, never state."""
 
-    def __init__(self, world: HeadlessWorld) -> None:
+    def __init__(
+        self,
+        world: HeadlessWorld,
+        *,
+        periodic_policy: PeriodicMotionPolicy | None = None,
+    ) -> None:
         self.world = world
         self.schedule = WorldSchedule.from_configs(world.live_config, world.economy_config)
+        self.periodic_policy = periodic_policy
         self._books_failed = False
 
     def advance(self) -> WorldTick:
@@ -79,9 +95,7 @@ class HeadlessRunner:
         if self._books_failed:
             raise RuntimeError("this world's books failed to close; it is not resumable")
         steps = self.schedule.mechanics_steps_per_economy_step
-        mechanics_ledger = self.world._step_mechanics()
-        for _ in range(steps - 1):
-            mechanics_ledger = self.world._step_mechanics()
+        mechanics = advance_mechanics_interval(self.world, steps, self.periodic_policy)
         economy_ledger = self.world._step_economy()
         if not bool(economy_ledger.books_closed.all()):
             self._books_failed = True
@@ -100,4 +114,14 @@ class HeadlessRunner:
                 f"mechanics sub-clock desynchronised: oldest gait {oldest_gait_s} s "
                 f"against ecological clock {sim_time_s} s"
             )
-        return WorldTick(steps, sim_time_s, economy_ledger, mechanics_ledger)
+        return WorldTick(
+            mechanics_steps=steps,
+            full_batch_mechanics_steps=mechanics.full_batch_steps,
+            representative_mechanics_steps=mechanics.representative_steps,
+            fast_forwarded_mechanics_steps=mechanics.fast_forwarded_steps,
+            sim_time_s=sim_time_s,
+            economy=economy_ledger,
+            last_mechanics_substep=mechanics.last_ledger,
+            mechanical_work_j=mechanics.mechanical_work_j,
+            periodic_error=mechanics.periodic_error,
+        )

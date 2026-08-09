@@ -14,8 +14,10 @@ is exactly the write-back section 3.2 forbids.
 
 Simulation time: `EconomyState.time_s` is the authoritative ecological clock and
 `sim_time_s` is a read-only view of it. `LiveState.gait_time_s` is the mechanics
-sub-clock, advanced once per substep; the runner keeps them in step and `advance()`
-is atomic, so they are never observable diverged.
+sub-clock, advanced by each canonical step or by explicitly verified periodic-step
+coverage. The runner keeps the clocks in step on successful advances. A failed
+post-step closure check leaves the world mutated and arrested rather than pretending
+the advance was atomic.
 
 Simulation time belongs to the core. Nothing here depends on a render frame and the
 whole module runs without Unity.
