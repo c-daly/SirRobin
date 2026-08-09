@@ -1,8 +1,12 @@
 # SirRobin living-loop recovery implementation plan
 
+> **Superseded 2026-08-09.** Retained as historical design and sequencing
+> evidence. Do not continue its tranche process. Active execution authority is
+> `2026-08-09-sirrobin-lean-living-loop-restart.md`.
+
 **Date:** 2026-07-13
 
-**Status:** active execution authority for `recovery/living-loop`
+**Status:** historical; superseded by the accepted lean restart plan
 
 **Branch baseline:** `0cea74e` (`Implement and evaluate S2 live locomotion`)
 
