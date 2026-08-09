@@ -115,6 +115,8 @@ def run_world(*, seconds: float, bodies: int, device_name: str) -> WorldRunRepor
     if not math.isclose(seconds, intervals * interval_s, rel_tol=1.0e-12, abs_tol=1.0e-12):
         raise ValueError(f"seconds must be an exact multiple of the fixture interval {interval_s:g}")
     initial_fields_q = _field_totals_q(world.economy_state)
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
     setup_wall_time_s = time.perf_counter() - setup_started
 
     advance_started = time.perf_counter()
