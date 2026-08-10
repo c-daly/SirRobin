@@ -20,6 +20,7 @@ from sirrobin.core.feeding import FeedingConfig
 from sirrobin.core.material import CreatureMaterialState, MaterialEnergyConfig
 from sirrobin.core.metabolism import MaintenanceConfig
 from sirrobin.core.periodic_motion import DEFAULT_PERIODIC_MOTION_POLICY
+from sirrobin.core.reproduction import BirthConfig, attempt_exact_clone_birth
 from sirrobin.core.runner import HeadlessRunner, WorldSchedule
 from sirrobin.core.world import HeadlessWorld
 from sirrobin.economy.config import EconomyConfig
@@ -44,6 +45,7 @@ FIXTURE_MATERIAL_ENERGY_CONFIG = MaterialEnergyConfig(
     reserve_j_per_q=0.45,
 )
 FIXTURE_MAINTENANCE_CONFIG = MaintenanceConfig(maintenance_w_per_kg=0.01)
+FIXTURE_BIRTH_CONFIG = BirthConfig(initial_reserve_q=100)
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +83,15 @@ class WorldRunReport:
     maintenance_heat_j: float
     death_dissipation_j: float
     starvation_deaths: int
+    birth_requested: bool
+    birth_succeeded: bool
+    birth_reason: str | None
+    birth_parent_id: int | None
+    birth_child_id: int | None
+    birth_structure_q: int
+    birth_initial_reserve_q: int
+    birth_total_debit_q: int
+    birth_construction_heat_j: float
     final_maintenance_carry_j: float
     final_intake_carry_mol: float
     final_assimilation_carry_q: float
@@ -119,7 +130,13 @@ def _build_fixture_world(
     device: torch.device,
     economy_interval_s: float,
     material_energy_config: MaterialEnergyConfig | None = None,
+    live_bodies: int | None = None,
+    reserve_q_per_creature: int = FIXTURE_RESERVE_Q_PER_BODY,
 ) -> HeadlessWorld:
+    if live_bodies is None:
+        live_bodies = bodies
+    if not 0 <= live_bodies <= bodies:
+        raise ValueError("live_bodies must fit inside body capacity")
     rows = json.loads(FIXTURE.read_text(encoding="utf-8"))["bodies"]
     swimmer = next(row for row in rows if row["id"] == "swimmer")
     genotype = GenotypeBatch.from_donor_rows(
@@ -127,6 +144,8 @@ def _build_fixture_world(
         dtype=torch.float64,
         device=device,
     )
+    genotype.alive[:, live_bodies:] = False
+    genotype.stable_id[:, live_bodies:] = 0
     economy_config = replace(
         EconomyConfig(),
         gx=1,
@@ -159,7 +178,7 @@ def _build_fixture_world(
         creature_material_state=CreatureMaterialState.uniform_live(
             alive,
             structure_q_per_creature=FIXTURE_STRUCTURE_Q_PER_BODY,
-            reserve_q_per_creature=FIXTURE_RESERVE_Q_PER_BODY,
+            reserve_q_per_creature=reserve_q_per_creature,
         ),
         material_energy_config=(
             FIXTURE_MATERIAL_ENERGY_CONFIG
@@ -177,6 +196,7 @@ def run_world(
     economy_interval_s: float = 0.1,
     feed_one: bool = False,
     maintain_one: bool = False,
+    birth_one: bool = False,
 ) -> WorldRunReport:
     if not math.isfinite(seconds) or seconds <= 0.0:
         raise ValueError("seconds must be positive and finite")
@@ -186,6 +206,10 @@ def run_world(
         raise ValueError("one-creature feeding requires exactly one body")
     if maintain_one and bodies != 1:
         raise ValueError("one-creature maintenance requires exactly one body")
+    if birth_one and bodies != 1:
+        raise ValueError("one-creature birth requires exactly one live body")
+    if birth_one and (feed_one or maintain_one):
+        raise ValueError("one-creature birth is a standalone transaction in this slice")
     if not math.isfinite(economy_interval_s) or economy_interval_s <= 0.0:
         raise ValueError("economy_interval_s must be positive and finite")
     try:
@@ -197,7 +221,15 @@ def run_world(
 
     setup_started = time.perf_counter()
     world = _build_fixture_world(
-        bodies=bodies,
+        bodies=2 if birth_one else bodies,
+        live_bodies=bodies,
+        reserve_q_per_creature=(
+            FIXTURE_STRUCTURE_Q_PER_BODY
+            + FIXTURE_BIRTH_CONFIG.initial_reserve_q
+            + FIXTURE_RESERVE_Q_PER_BODY
+            if birth_one
+            else FIXTURE_RESERVE_Q_PER_BODY
+        ),
         device=device,
         economy_interval_s=economy_interval_s,
     )
@@ -286,6 +318,11 @@ def run_world(
             maintenance_heat_j += tick.maintenance.maintenance_heat_j
             death_dissipation_j += tick.maintenance.death_dissipation_j
             starvation_deaths += int(tick.maintenance.starved)
+    birth_report = None
+    if birth_one:
+        birth_before = world.matter_totals()
+        birth_report = attempt_exact_clone_birth(world, FIXTURE_BIRTH_CONFIG)
+        books_closed &= bool(world.close_matter_step(birth_before).books_closed.all())
     if device.type == "cuda":
         torch.cuda.synchronize(device)
     advance_wall_time_s = time.perf_counter() - advance_started
@@ -337,6 +374,19 @@ def run_world(
         maintenance_heat_j=maintenance_heat_j,
         death_dissipation_j=death_dissipation_j,
         starvation_deaths=starvation_deaths,
+        birth_requested=birth_one,
+        birth_succeeded=bool(birth_report is not None and birth_report.born),
+        birth_reason=None if birth_report is None else birth_report.reason,
+        birth_parent_id=None if birth_report is None else birth_report.parent_id,
+        birth_child_id=None if birth_report is None else birth_report.child_id,
+        birth_structure_q=0 if birth_report is None else birth_report.structure_q,
+        birth_initial_reserve_q=(
+            0 if birth_report is None else birth_report.initial_reserve_q
+        ),
+        birth_total_debit_q=0 if birth_report is None else birth_report.total_debit_q,
+        birth_construction_heat_j=(
+            0.0 if birth_report is None else birth_report.construction_heat_j
+        ),
         final_maintenance_carry_j=float(
             world.creature_material.maintenance_carry_j.sum().item()
         ),
@@ -433,6 +483,16 @@ def format_report(report: WorldRunReport) -> str:
             f"maintenance heat J: {report.maintenance_heat_j:.9g}",
             f"death dissipation J: {report.death_dissipation_j:.9g}",
             f"starvation deaths: {report.starvation_deaths}",
+            "one paid exact-clone birth requested: "
+            f"{'yes' if report.birth_requested else 'no'}",
+            f"birth succeeded: {'yes' if report.birth_succeeded else 'no'}",
+            f"birth refusal reason: {report.birth_reason or 'none'}",
+            "birth parent/child IDs: "
+            f"{report.birth_parent_id or 0} -> {report.birth_child_id or 0}",
+            f"birth structure q: {report.birth_structure_q}",
+            f"birth initial reserve q: {report.birth_initial_reserve_q}",
+            f"birth total parent debit q: {report.birth_total_debit_q}",
+            f"birth construction heat J: {report.birth_construction_heat_j:.9g}",
             f"final maintenance carry J: {report.final_maintenance_carry_j:.9g}",
             f"integrated mechanical work J: {report.mechanical_work_j:.9g}",
             "periodic projected drift totals across economy intervals: "
@@ -474,6 +534,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="enable mass-derived maintenance and starvation death for one creature",
     )
+    parser.add_argument(
+        "--birth-one",
+        action="store_true",
+        help="attempt one paid exact-clone birth after the requested run",
+    )
     arguments = parser.parse_args(argv)
     try:
         report = run_world(
@@ -483,6 +548,7 @@ def main(argv: list[str] | None = None) -> int:
             economy_interval_s=arguments.economy_interval,
             feed_one=arguments.feed_one,
             maintain_one=arguments.maintain_one,
+            birth_one=arguments.birth_one,
         )
     except ValueError as error:
         parser.error(str(error))

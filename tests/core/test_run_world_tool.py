@@ -107,6 +107,29 @@ def test_run_world_exposes_mass_derived_maintenance() -> None:
     assert "exact whole-world books closed: yes" in completed.stdout
 
 
+def test_run_world_exposes_one_paid_exact_clone_birth() -> None:
+    completed = _run_world(
+        "--seconds",
+        "0.1",
+        "--economy-interval",
+        "0.1",
+        "--bodies",
+        "1",
+        "--birth-one",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "one paid exact-clone birth requested: yes" in completed.stdout
+    assert "birth succeeded: yes" in completed.stdout
+    assert "birth parent/child IDs: 1 -> 2" in completed.stdout
+    assert "birth structure q: 1000" in completed.stdout
+    assert "birth initial reserve q: 100" in completed.stdout
+    assert "birth total parent debit q: 1100" in completed.stdout
+    assert "birth construction heat J: 450" in completed.stdout
+    assert "population: 2" in completed.stdout
+    assert "exact whole-world books closed: yes" in completed.stdout
+
+
 @pytest.mark.parametrize(
     ("seconds", "bodies", "message"),
     [

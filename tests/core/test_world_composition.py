@@ -5,8 +5,8 @@ one headless place where mechanics and economy advance on one declared schedule 
 complete tick verifies both the field subsystem and field-plus-creature books.
 
 Class: invariant (plan §5.1 — books close exactly after every complete tick) plus
-validity (finite mechanical state). Creature stores exist, but this does not claim that
-feeding, metabolism, birth, or death transfers exist yet.
+validity (finite mechanical state). Mechanism-specific feeding, maintenance, death, and
+birth claims live in their focused tests rather than being inferred from this smoke test.
 """
 
 from __future__ import annotations

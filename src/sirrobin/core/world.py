@@ -24,8 +24,9 @@ whole module runs without Unity.
 
 Tracked creature structure and reserve are a separate integer authority from physical
 body mass. The whole-world baseline sums them with the four field reservoirs. The
-optional one-creature feeding transaction crosses that seam; later lifecycle transfers
-must use it without giving either subsystem a second global ledger.
+one-creature feeding and maintenance transactions and paid exact-clone birth cross that
+seam; later lifecycle depth must use it without giving either subsystem a second global
+ledger.
 """
 
 from __future__ import annotations
@@ -82,6 +83,10 @@ class HeadlessWorld:
             )
 
         self.genotype = genotype
+        maximum_ids = genotype.stable_id.max(dim=1).values
+        if bool((maximum_ids >= torch.iinfo(torch.int64).max).any()):
+            raise ValueError("stable ID allocator is exhausted")
+        self._next_stable_id = maximum_ids + 1
         body = develop(genotype)
         self.body = replace(
             body, **{name: getattr(body, name).clone() for name in _ALIASED_BODY_FIELDS}
@@ -142,6 +147,19 @@ class HeadlessWorld:
     def material_energy_config(self) -> MaterialEnergyConfig:
         """Immutable world binding for producer and reserve chemical energy."""
         return self._material_energy_config
+
+    @property
+    def next_stable_id(self) -> torch.Tensor:
+        """Read-only copy of the per-world monotonic ID allocator state."""
+        return self._next_stable_id.clone()
+
+    def _allocate_stable_id(self, world_index: int) -> int:
+        """Consume one ID after a lifecycle transaction has passed all preflight."""
+        value = int(self._next_stable_id[world_index].item())
+        if value >= torch.iinfo(torch.int64).max:
+            raise ValueError("stable ID allocator is exhausted")
+        self._next_stable_id[world_index] = value + 1
+        return value
 
     def rebuild_body(self) -> None:
         """Regenerate the developed-body cache from the genotype authority."""
