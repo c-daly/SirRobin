@@ -34,12 +34,14 @@ class CreatureMaterialState:
     reserve_q: torch.Tensor
     intake_carry_mol: torch.Tensor
     assimilation_carry_q: torch.Tensor
+    maintenance_carry_j: torch.Tensor
 
     @classmethod
     def zeros_like(cls, alive: torch.Tensor) -> CreatureMaterialState:
         return cls(
             torch.zeros_like(alive, dtype=torch.int64),
             torch.zeros_like(alive, dtype=torch.int64),
+            torch.zeros_like(alive, dtype=torch.float64),
             torch.zeros_like(alive, dtype=torch.float64),
             torch.zeros_like(alive, dtype=torch.float64),
         )
@@ -70,6 +72,7 @@ class CreatureMaterialState:
             ),
             torch.zeros_like(alive, dtype=torch.float64),
             torch.zeros_like(alive, dtype=torch.float64),
+            torch.zeros_like(alive, dtype=torch.float64),
         )
 
     @property
@@ -77,10 +80,20 @@ class CreatureMaterialState:
         return self.structure_q, self.reserve_q
 
     @property
-    def carries(self) -> tuple[torch.Tensor, torch.Tensor]:
-        return self.intake_carry_mol, self.assimilation_carry_q
+    def carries(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return (
+            self.intake_carry_mol,
+            self.assimilation_carry_q,
+            self.maintenance_carry_j,
+        )
 
-    def validate(self, alive: torch.Tensor, *, q_mass_mol: float) -> None:
+    def validate(
+        self,
+        alive: torch.Tensor,
+        *,
+        q_mass_mol: float,
+        reserve_j_per_q: float,
+    ) -> None:
         expected = tuple(alive.shape)
         for name, reservoir in zip(
             ("structure_q", "reserve_q"), self.reservoirs, strict=True
@@ -98,9 +111,9 @@ class CreatureMaterialState:
             if torch.any((~alive) & (reservoir != 0)):
                 raise ValueError(f"{name} cannot assign material to an inactive slot")
         for name, carry, upper in zip(
-            ("intake_carry_mol", "assimilation_carry_q"),
+            ("intake_carry_mol", "assimilation_carry_q", "maintenance_carry_j"),
             self.carries,
-            (q_mass_mol, 1.0),
+            (q_mass_mol, 1.0, reserve_j_per_q),
             strict=True,
         ):
             if carry.dtype != torch.float64:
@@ -152,6 +165,7 @@ def matter_totals(
     field_shape: tuple[int, int, int, int],
     max_inventory_q: int,
     q_mass_mol: float,
+    reserve_j_per_q: float,
 ) -> MatterTotals:
     worlds = int(alive.shape[0])
     device = alive.device
@@ -192,7 +206,11 @@ def matter_totals(
         valid &= ((reservoir == 0) | alive).all(dim=1)
         approximate_total += reservoir.to(torch.float64).sum(dim=1)
         creature_totals.append(reservoir.sum(dim=1, dtype=torch.int64))
-    for carry, upper in zip(creatures.carries, (q_mass_mol, 1.0), strict=True):
+    for carry, upper in zip(
+        creatures.carries,
+        (q_mass_mol, 1.0, reserve_j_per_q),
+        strict=True,
+    ):
         schema_valid = (
             isinstance(carry, torch.Tensor)
             and carry.dtype == torch.float64

@@ -82,6 +82,31 @@ def test_run_world_rejects_feeding_without_the_scoped_population() -> None:
     assert "exactly one body" in completed.stderr
 
 
+def test_run_world_exposes_mass_derived_maintenance() -> None:
+    completed = _run_world(
+        "--seconds",
+        "1",
+        "--economy-interval",
+        "1",
+        "--bodies",
+        "1",
+        "--maintain-one",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "one-creature maintenance enabled: yes" in completed.stdout
+    assert "maintenance events: 1" in completed.stdout
+    debit = int(re.search(r"maintenance reserve debit q: (\d+)", completed.stdout).group(1))
+    returned = int(
+        re.search(r"maintenance dissolved return q: (\d+)", completed.stdout).group(1)
+    )
+    assert debit > 0
+    assert returned == debit
+    assert "starvation deaths: 0" in completed.stdout
+    assert "maintenance heat J: " in completed.stdout
+    assert "exact whole-world books closed: yes" in completed.stdout
+
+
 @pytest.mark.parametrize(
     ("seconds", "bodies", "message"),
     [

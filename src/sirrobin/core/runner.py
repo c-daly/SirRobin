@@ -19,6 +19,11 @@ import torch
 
 from sirrobin.core.feeding import FeedingConfig, FeedingReport, feed_single_creature
 from sirrobin.core.material import WholeWorldMatterLedger
+from sirrobin.core.metabolism import (
+    MaintenanceConfig,
+    MaintenanceReport,
+    maintain_single_creature,
+)
 from sirrobin.core.periodic_motion import (
     PeriodicErrorEstimate,
     PeriodicMotionPolicy,
@@ -71,6 +76,7 @@ class WorldTick:
     sim_time_s: float
     economy: EconomyStepLedger
     feeding: FeedingReport | None
+    maintenance: MaintenanceReport | None
     matter: WholeWorldMatterLedger
     last_mechanics_substep: LiveStepLedger
     mechanical_work_j: torch.Tensor
@@ -86,6 +92,7 @@ class HeadlessRunner:
         *,
         periodic_policy: PeriodicMotionPolicy | None = None,
         feeding_config: FeedingConfig | None = None,
+        maintenance_config: MaintenanceConfig | None = None,
     ) -> None:
         self.world = world
         self.schedule = WorldSchedule.from_configs(world.live_config, world.economy_config)
@@ -93,6 +100,9 @@ class HeadlessRunner:
         if feeding_config is not None and int(world.body.alive.sum().item()) != 1:
             raise ValueError("feeding currently requires exactly one live creature")
         self.feeding_config = feeding_config
+        if maintenance_config is not None and int(world.body.alive.sum().item()) > 1:
+            raise ValueError("maintenance currently supports at most one live creature")
+        self.maintenance_config = maintenance_config
         self._books_failed = False
 
     def advance(self) -> WorldTick:
@@ -105,9 +115,13 @@ class HeadlessRunner:
         """
         if self._books_failed:
             raise RuntimeError("this world is arrested; it is not resumable")
-        if self.feeding_config is not None and int(self.world.body.alive.sum().item()) != 1:
+        live_count = int(self.world.body.alive.sum().item())
+        if self.feeding_config is not None and live_count > 1:
             self._books_failed = True
             raise RuntimeError("feeding requires exactly one live creature before the tick")
+        if self.maintenance_config is not None and live_count > 1:
+            self._books_failed = True
+            raise RuntimeError("maintenance supports at most one live creature before the tick")
         steps = self.schedule.mechanics_steps_per_economy_step
         matter_before = self.world.matter_totals()
         if not bool(matter_before.raw_reservoirs_valid.all()):
@@ -125,7 +139,16 @@ class HeadlessRunner:
                 raise RuntimeError(f"exact nutrient books do not close in worlds {failed}")
             feeding = (
                 feed_single_creature(self.world, self.feeding_config)
-                if self.feeding_config is not None
+                if self.feeding_config is not None and live_count == 1
+                else None
+            )
+            maintenance = (
+                maintain_single_creature(
+                    self.world,
+                    self.maintenance_config,
+                    last_mechanics_substep=mechanics.last_ledger,
+                )
+                if self.maintenance_config is not None
                 else None
             )
             matter_ledger = self.world.close_matter_step(matter_before)
@@ -139,12 +162,15 @@ class HeadlessRunner:
             # clock. A creature alive since t=0 has advanced by exactly the elapsed time,
             # so the oldest gait phase equals sim_time_s. Tolerance is half a substep.
             sim_time_s = self.world.sim_time_s
-            oldest_gait_s = float(self.world.live_state.gait_time_s.max())
-            if abs(oldest_gait_s - sim_time_s) > 0.5 * self.world.live_config.dt:
-                raise RuntimeError(
-                    f"mechanics sub-clock desynchronised: oldest gait {oldest_gait_s} s "
-                    f"against ecological clock {sim_time_s} s"
+            if bool(self.world.body.alive.any()):
+                oldest_gait_s = float(
+                    self.world.live_state.gait_time_s[self.world.body.alive].max()
                 )
+                if abs(oldest_gait_s - sim_time_s) > 0.5 * self.world.live_config.dt:
+                    raise RuntimeError(
+                        f"mechanics sub-clock desynchronised: oldest gait {oldest_gait_s} s "
+                        f"against ecological clock {sim_time_s} s"
+                    )
         except Exception:
             self._books_failed = True
             raise
@@ -156,6 +182,7 @@ class HeadlessRunner:
             sim_time_s=sim_time_s,
             economy=economy_ledger,
             feeding=feeding,
+            maintenance=maintenance,
             matter=matter_ledger,
             last_mechanics_substep=mechanics.last_ledger,
             mechanical_work_j=mechanics.mechanical_work_j,

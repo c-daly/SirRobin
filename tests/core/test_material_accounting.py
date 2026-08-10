@@ -61,6 +61,7 @@ def _world(
             reserve_q=torch.tensor([reserve_q], dtype=torch.int64),
             intake_carry_mol=carry.clone(),
             assimilation_carry_q=carry.clone(),
+            maintenance_carry_j=carry.clone(),
         )
     return HeadlessWorld(
         genotype=genotype,
@@ -138,6 +139,7 @@ def test_malformed_creature_material_is_rejected(
         "reserve_q": torch.tensor([[1, 1]], dtype=torch.int64),
         "intake_carry_mol": torch.zeros((1, 2), dtype=torch.float64),
         "assimilation_carry_q": torch.zeros((1, 2), dtype=torch.float64),
+        "maintenance_carry_j": torch.zeros((1, 2), dtype=torch.float64),
     }
     values[field] = value
 
@@ -151,6 +153,7 @@ def test_inactive_capacity_cannot_hide_material() -> None:
         reserve_q=torch.tensor([[0, 0]], dtype=torch.int64),
         intake_carry_mol=torch.zeros((1, 2), dtype=torch.float64),
         assimilation_carry_q=torch.zeros((1, 2), dtype=torch.float64),
+        maintenance_carry_j=torch.zeros((1, 2), dtype=torch.float64),
     )
 
     with pytest.raises(ValueError, match="inactive"):
@@ -163,6 +166,7 @@ def test_whole_world_inventory_respects_the_safe_exact_reduction_bound() -> None
         reserve_q=torch.zeros((1, 2), dtype=torch.int64),
         intake_carry_mol=torch.zeros((1, 2), dtype=torch.float64),
         assimilation_carry_q=torch.zeros((1, 2), dtype=torch.float64),
+        maintenance_carry_j=torch.zeros((1, 2), dtype=torch.float64),
     )
 
     with pytest.raises(ValueError, match="whole-world inventory"):

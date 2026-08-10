@@ -18,6 +18,7 @@ import torch
 
 from sirrobin.core.feeding import FeedingConfig
 from sirrobin.core.material import CreatureMaterialState, MaterialEnergyConfig
+from sirrobin.core.metabolism import MaintenanceConfig
 from sirrobin.core.periodic_motion import DEFAULT_PERIODIC_MOTION_POLICY
 from sirrobin.core.runner import HeadlessRunner, WorldSchedule
 from sirrobin.core.world import HeadlessWorld
@@ -42,6 +43,7 @@ FIXTURE_MATERIAL_ENERGY_CONFIG = MaterialEnergyConfig(
     producer_j_per_q=0.50,
     reserve_j_per_q=0.45,
 )
+FIXTURE_MAINTENANCE_CONFIG = MaintenanceConfig(maintenance_w_per_kg=0.01)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +73,15 @@ class WorldRunReport:
     feeding_reserve_credit_q: int
     feeding_dissolved_return_q: int
     feeding_assimilation_heat_j: float
+    maintenance_enabled: bool
+    maintenance_events: int
+    maintenance_reserve_debit_q: int
+    maintenance_dissolved_return_q: int
+    death_return_q: int
+    maintenance_heat_j: float
+    death_dissipation_j: float
+    starvation_deaths: int
+    final_maintenance_carry_j: float
     final_intake_carry_mol: float
     final_assimilation_carry_q: float
     producer_j_per_q: float
@@ -103,7 +114,11 @@ def _field_totals_q(state: EconomyState) -> tuple[int, int, int, int]:
 
 
 def _build_fixture_world(
-    *, bodies: int, device: torch.device, economy_interval_s: float
+    *,
+    bodies: int,
+    device: torch.device,
+    economy_interval_s: float,
+    material_energy_config: MaterialEnergyConfig | None = None,
 ) -> HeadlessWorld:
     rows = json.loads(FIXTURE.read_text(encoding="utf-8"))["bodies"]
     swimmer = next(row for row in rows if row["id"] == "swimmer")
@@ -146,7 +161,11 @@ def _build_fixture_world(
             structure_q_per_creature=FIXTURE_STRUCTURE_Q_PER_BODY,
             reserve_q_per_creature=FIXTURE_RESERVE_Q_PER_BODY,
         ),
-        material_energy_config=FIXTURE_MATERIAL_ENERGY_CONFIG,
+        material_energy_config=(
+            FIXTURE_MATERIAL_ENERGY_CONFIG
+            if material_energy_config is None
+            else material_energy_config
+        ),
     )
 
 
@@ -157,6 +176,7 @@ def run_world(
     device_name: str,
     economy_interval_s: float = 0.1,
     feed_one: bool = False,
+    maintain_one: bool = False,
 ) -> WorldRunReport:
     if not math.isfinite(seconds) or seconds <= 0.0:
         raise ValueError("seconds must be positive and finite")
@@ -164,6 +184,8 @@ def run_world(
         raise ValueError("bodies must be positive")
     if feed_one and bodies != 1:
         raise ValueError("one-creature feeding requires exactly one body")
+    if maintain_one and bodies != 1:
+        raise ValueError("one-creature maintenance requires exactly one body")
     if not math.isfinite(economy_interval_s) or economy_interval_s <= 0.0:
         raise ValueError("economy_interval_s must be positive and finite")
     try:
@@ -186,6 +208,7 @@ def run_world(
         world,
         periodic_policy=DEFAULT_PERIODIC_MOTION_POLICY,
         feeding_config=FIXTURE_FEEDING_CONFIG if feed_one else None,
+        maintenance_config=FIXTURE_MAINTENANCE_CONFIG if maintain_one else None,
     )
     interval_s = world.economy_config.dt_eco_s
     intervals = round(seconds / interval_s)
@@ -215,6 +238,13 @@ def run_world(
     feeding_reserve_credit_q = 0
     feeding_dissolved_return_q = 0
     feeding_assimilation_heat_j = 0.0
+    maintenance_events = 0
+    maintenance_reserve_debit_q = 0
+    maintenance_dissolved_return_q = 0
+    death_return_q = 0
+    maintenance_heat_j = 0.0
+    death_dissipation_j = 0.0
+    starvation_deaths = 0
     for _ in range(intervals):
         tick = runner.advance()
         books_closed &= bool(tick.matter.books_closed.all())
@@ -248,12 +278,26 @@ def run_world(
             feeding_reserve_credit_q += tick.feeding.reserve_credit_q
             feeding_dissolved_return_q += tick.feeding.dissolved_return_q
             feeding_assimilation_heat_j += tick.feeding.assimilation_heat_j
+        if tick.maintenance is not None:
+            maintenance_events += 1
+            maintenance_reserve_debit_q += tick.maintenance.debit_q
+            maintenance_dissolved_return_q += tick.maintenance.maintenance_return_q
+            death_return_q += tick.maintenance.death_return_q
+            maintenance_heat_j += tick.maintenance.maintenance_heat_j
+            death_dissipation_j += tick.maintenance.death_dissipation_j
+            starvation_deaths += int(tick.maintenance.starved)
     if device.type == "cuda":
         torch.cuda.synchronize(device)
     advance_wall_time_s = time.perf_counter() - advance_started
 
-    gait_time = world.live_state.gait_time_s
-    positions = world.live_state.position_enu_m.reshape(-1, 3)
+    live = world.body.alive
+    live_gait_time = world.live_state.gait_time_s[live]
+    gait_time = (
+        live_gait_time
+        if live_gait_time.numel() > 0
+        else torch.tensor([world.sim_time_s], dtype=torch.float64, device=device)
+    )
+    positions = world.live_state.position_enu_m[live]
     sample = positions[: min(8, positions.shape[0])].detach().cpu().tolist()
     shipped_schedule = WorldSchedule.from_configs(LiveLocomotionConfig(), EconomyConfig())
     final_matter = world.matter_totals()
@@ -285,6 +329,17 @@ def run_world(
         feeding_reserve_credit_q=feeding_reserve_credit_q,
         feeding_dissolved_return_q=feeding_dissolved_return_q,
         feeding_assimilation_heat_j=feeding_assimilation_heat_j,
+        maintenance_enabled=maintain_one,
+        maintenance_events=maintenance_events,
+        maintenance_reserve_debit_q=maintenance_reserve_debit_q,
+        maintenance_dissolved_return_q=maintenance_dissolved_return_q,
+        death_return_q=death_return_q,
+        maintenance_heat_j=maintenance_heat_j,
+        death_dissipation_j=death_dissipation_j,
+        starvation_deaths=starvation_deaths,
+        final_maintenance_carry_j=float(
+            world.creature_material.maintenance_carry_j.sum().item()
+        ),
         final_intake_carry_mol=float(
             world.creature_material.intake_carry_mol.sum().item()
         ),
@@ -368,6 +423,17 @@ def format_report(report: WorldRunReport) -> str:
             f"reserve chemical energy density J/q: {report.reserve_j_per_q:.9g}",
             "final feeding assimilation carry energy J: "
             f"{report.final_assimilation_carry_energy_j:.9g}",
+            "one-creature maintenance enabled: "
+            f"{'yes' if report.maintenance_enabled else 'no'}",
+            f"maintenance events: {report.maintenance_events}",
+            f"maintenance reserve debit q: {report.maintenance_reserve_debit_q}",
+            "maintenance dissolved return q: "
+            f"{report.maintenance_dissolved_return_q}",
+            f"death material return q: {report.death_return_q}",
+            f"maintenance heat J: {report.maintenance_heat_j:.9g}",
+            f"death dissipation J: {report.death_dissipation_j:.9g}",
+            f"starvation deaths: {report.starvation_deaths}",
+            f"final maintenance carry J: {report.final_maintenance_carry_j:.9g}",
             f"integrated mechanical work J: {report.mechanical_work_j:.9g}",
             "periodic projected drift totals across economy intervals: "
             f"translation={report.periodic_projected_translation_drift_m:.9g} m "
@@ -403,6 +469,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="enable the scoped one-live-creature feeding transaction",
     )
+    parser.add_argument(
+        "--maintain-one",
+        action="store_true",
+        help="enable mass-derived maintenance and starvation death for one creature",
+    )
     arguments = parser.parse_args(argv)
     try:
         report = run_world(
@@ -411,6 +482,7 @@ def main(argv: list[str] | None = None) -> int:
             device_name=arguments.device,
             economy_interval_s=arguments.economy_interval,
             feed_one=arguments.feed_one,
+            maintain_one=arguments.maintain_one,
         )
     except ValueError as error:
         parser.error(str(error))

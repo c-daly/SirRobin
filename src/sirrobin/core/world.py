@@ -93,12 +93,14 @@ class HeadlessWorld:
         self.economy = EconomyKernel(economy_state, economy_config)
         self.geometry = GridGeometry.from_config(economy_config)
         self.creature_material = creature_material_state
-        self.creature_material.validate(
-            self.body.alive, q_mass_mol=economy_config.q_mass_mol
-        )
         if not isinstance(material_energy_config, MaterialEnergyConfig):
             raise TypeError("material_energy_config must be MaterialEnergyConfig")
         self._material_energy_config = material_energy_config
+        self.creature_material.validate(
+            self.body.alive,
+            q_mass_mol=economy_config.q_mass_mol,
+            reserve_j_per_q=material_energy_config.reserve_j_per_q,
+        )
         initial_matter = self.matter_totals()
         if not bool(initial_matter.raw_reservoirs_valid.all()):
             raise ValueError("whole-world inventory exceeds the configured safe reduction bound")
@@ -148,7 +150,9 @@ class HeadlessWorld:
             body, **{name: getattr(body, name).clone() for name in _ALIASED_BODY_FIELDS}
         )
         self.creature_material.validate(
-            self.body.alive, q_mass_mol=self.economy_config.q_mass_mol
+            self.body.alive,
+            q_mass_mol=self.economy_config.q_mass_mol,
+            reserve_j_per_q=self.material_energy_config.reserve_j_per_q,
         )
 
     def matter_totals(self) -> MatterTotals:
@@ -160,6 +164,7 @@ class HeadlessWorld:
             field_shape=self.economy_config.shape,
             max_inventory_q=self.economy_config.max_inventory_q,
             q_mass_mol=self.economy_config.q_mass_mol,
+            reserve_j_per_q=self.material_energy_config.reserve_j_per_q,
         )
 
     @property
