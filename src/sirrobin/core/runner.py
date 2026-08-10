@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 import torch
 
+from sirrobin.core.material import WholeWorldMatterLedger
 from sirrobin.core.periodic_motion import (
     PeriodicErrorEstimate,
     PeriodicMotionPolicy,
@@ -57,6 +58,8 @@ class WorldTick:
     `economy` covers the whole interval. `last_mechanics_substep` is the final canonical
     substep only. `mechanical_work_j` integrates named dissipated power across actual
     and verified repeated cycles; it is observation, not yet a creature-energy debit.
+    `economy` proves the field subsystem conserved its step input; `matter` is the
+    authoritative field-plus-creature baseline ledger.
     """
 
     mechanics_steps: int
@@ -65,6 +68,7 @@ class WorldTick:
     fast_forwarded_mechanics_steps: int
     sim_time_s: float
     economy: EconomyStepLedger
+    matter: WholeWorldMatterLedger
     last_mechanics_substep: LiveStepLedger
     mechanical_work_j: torch.Tensor
     periodic_error: PeriodicErrorEstimate | None
@@ -95,12 +99,27 @@ class HeadlessRunner:
         if self._books_failed:
             raise RuntimeError("this world's books failed to close; it is not resumable")
         steps = self.schedule.mechanics_steps_per_economy_step
+        matter_before = self.world.matter_totals()
+        if not bool(matter_before.raw_reservoirs_valid.all()):
+            self._books_failed = True
+            failed = (~matter_before.raw_reservoirs_valid).nonzero().flatten().tolist()
+            raise RuntimeError(
+                "whole-world nutrient books do not close in worlds "
+                f"{failed} (invalid raw reservoir state)"
+            )
         mechanics = advance_mechanics_interval(self.world, steps, self.periodic_policy)
         economy_ledger = self.world._step_economy()
+        matter_ledger = self.world.close_matter_step(matter_before)
         if not bool(economy_ledger.books_closed.all()):
             self._books_failed = True
             failed = (~economy_ledger.books_closed).nonzero().flatten().tolist()
             raise RuntimeError(f"exact nutrient books do not close in worlds {failed}")
+        if not bool(matter_ledger.books_closed.all()):
+            self._books_failed = True
+            failed = (~matter_ledger.books_closed).nonzero().flatten().tolist()
+            raise RuntimeError(
+                f"whole-world nutrient books do not close in worlds {failed}"
+            )
 
         # The mechanics sub-clock must stay in step with the authoritative ecological
         # clock. A creature alive since t=0 has advanced by exactly the elapsed time, so
@@ -121,6 +140,7 @@ class HeadlessRunner:
             fast_forwarded_mechanics_steps=mechanics.fast_forwarded_steps,
             sim_time_s=sim_time_s,
             economy=economy_ledger,
+            matter=matter_ledger,
             last_mechanics_substep=mechanics.last_ledger,
             mechanical_work_j=mechanics.mechanical_work_j,
             periodic_error=mechanics.periodic_error,

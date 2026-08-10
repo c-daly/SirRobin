@@ -35,9 +35,13 @@ def test_run_world_reports_authoritative_state_and_measured_cost() -> None:
     assert "shipped mechanics steps / economy step: 1036800" in completed.stdout
     assert "population: 2" in completed.stdout
     assert "initial field totals q: ND=40000000 BP=4000000 BD=500000 BM=0" in completed.stdout
-    assert "initial total q: 44500000" in completed.stdout
-    assert "final total q: 44500000" in completed.stdout
-    assert "exact books closed: yes" in completed.stdout
+    assert "initial field total q: 44500000" in completed.stdout
+    assert "final field total q: 44500000" in completed.stdout
+    assert "initial creature totals q: structure=2000 reserve=1000" in completed.stdout
+    assert "final creature totals q: structure=2000 reserve=1000" in completed.stdout
+    assert "initial whole-world total q: 44503000" in completed.stdout
+    assert "final whole-world total q: 44503000" in completed.stdout
+    assert "exact whole-world books closed: yes" in completed.stdout
     assert "mechanics clock range s: 0.2 .. 0.2" in completed.stdout
     assert "positions sample ENU m (2/2):" in completed.stdout
     assert "wall time s:" in completed.stdout

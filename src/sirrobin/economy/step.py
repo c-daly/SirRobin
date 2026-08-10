@@ -18,7 +18,6 @@ class EconomyKernel:
         state.validate(config)
         self.state = state
         self.config = config
-        self.mass_ledger = MassLedger.from_state(state)
 
     def step(self) -> EconomyStepLedger:
         state, config = self.state, self.config
@@ -61,7 +60,11 @@ class EconomyKernel:
         state.time_s.add_(config.dt_eco_s)
         state.buffer_parity.bitwise_xor_(1)
         after = state.total_per_world()
-        closed = self.mass_ledger.close_books(state)
+        # This ledger proves that the field subsystem's own reaction/transport step
+        # conserves what entered it. The composed world's persistent baseline also
+        # includes creature stores and is enforced by HeadlessRunner; keeping a second
+        # permanent field-only baseline would reject legitimate cross-domain transfers.
+        closed = MassLedger(before).close_books(state)
         return EconomyStepLedger(
             reaction.production_q,
             reaction.producer_maintenance_q,

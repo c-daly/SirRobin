@@ -10,6 +10,7 @@ import pytest
 import torch
 
 import sirrobin.core.periodic_motion as periodic_motion
+from sirrobin.core.material import CreatureMaterialState
 from sirrobin.core.periodic_motion import (
     PeriodicErrorEstimate,
     PeriodicMotionPolicy,
@@ -60,6 +61,7 @@ def _world(
         live_config=LiveLocomotionConfig(),
         economy_state=state,
         economy_config=config,
+        creature_material_state=CreatureMaterialState.zeros_like(genotype.alive),
     )
 
 

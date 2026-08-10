@@ -1,13 +1,12 @@
-"""Tranche A composition smoke test.
+"""Headless composition and exact whole-world accounting smoke test.
 
 Claim protected — the next consumer cannot function safely or honestly unless there is
 one headless place where mechanics and economy advance on one declared schedule and the
-complete tick verifies the books. Immediate consumer: Tranche B steps 4-5, whose reduced
-surge/yaw step must have its complete-world cost measured inside a composed runner.
+complete tick verifies both the field subsystem and field-plus-creature books.
 
 Class: invariant (plan §5.1 — books close exactly after every complete tick) plus
-validity (finite mechanical state). This does NOT claim the subsystems are biologically
-coupled; feeding, metabolism, and the whole-world creature/field ledger are Tranche C/D.
+validity (finite mechanical state). Creature stores exist, but this does not claim that
+feeding, metabolism, birth, or death transfers exist yet.
 """
 
 from __future__ import annotations
@@ -19,6 +18,7 @@ from pathlib import Path
 import pytest
 import torch
 
+from sirrobin.core.material import CreatureMaterialState
 from sirrobin.core.runner import HeadlessRunner, WorldSchedule
 from sirrobin.core.world import HeadlessWorld
 from sirrobin.economy.config import EconomyConfig
@@ -67,6 +67,7 @@ def _world() -> HeadlessWorld:
         live_config=LiveLocomotionConfig(),
         economy_state=state,
         economy_config=config,
+        creature_material_state=CreatureMaterialState.zeros_like(genotype.alive),
     )
 
 
@@ -74,6 +75,7 @@ def test_composed_world_advances_both_clocks_and_closes_its_books_without_unity(
     runner = HeadlessRunner(_world())
     world = runner.world
     expected_total = world.economy_state.total_per_world().clone()
+    expected_whole_total = world.matter_totals().total_q.clone()
     substeps = runner.schedule.mechanics_steps_per_economy_step
 
     for interval in range(1, 4):
@@ -96,7 +98,9 @@ def test_composed_world_advances_both_clocks_and_closes_its_books_without_unity(
         # already required the books to close; these assert the same facts the runner
         # enforces, plus finiteness of the mechanical state it advanced.
         assert tick.economy.books_closed.all()
+        assert tick.matter.books_closed.all()
         assert torch.equal(world.economy_state.total_per_world(), expected_total)
+        assert torch.equal(tick.matter.total_after_q, expected_whole_total)
         world.economy_state.validate(world.economy_config)
         assert torch.isfinite(world.live_state.position_enu_m).all()
         assert torch.isfinite(world.live_state.velocity_rel_water_enu_m_s).all()

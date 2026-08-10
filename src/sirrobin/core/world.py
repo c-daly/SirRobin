@@ -21,13 +21,27 @@ the advance was atomic.
 
 Simulation time belongs to the core. Nothing here depends on a render frame and the
 whole module runs without Unity.
+
+Tracked creature structure and reserve are a separate integer authority from physical
+body mass. The whole-world baseline sums them with the four field reservoirs. No
+feeding or lifecycle transfer exists yet; this seam makes those transfers possible
+without giving either subsystem a second global ledger.
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
 
+import torch
+
 from sirrobin.core.live_world import advance_live_world, initialize_live_state
+from sirrobin.core.material import (
+    CreatureMaterialState,
+    MatterTotals,
+    WholeWorldMatterLedger,
+    close_world_matter,
+    matter_totals,
+)
 from sirrobin.economy.config import EconomyConfig
 from sirrobin.economy.contracts import EconomyStepLedger
 from sirrobin.economy.state import EconomyState
@@ -55,6 +69,7 @@ class HeadlessWorld:
         live_config: LiveLocomotionConfig,
         economy_state: EconomyState,
         economy_config: EconomyConfig,
+        creature_material_state: CreatureMaterialState,
     ) -> None:
         live_config.validate()
         economy_config.validate()
@@ -75,6 +90,12 @@ class HeadlessWorld:
         self.live_config = live_config
         self.economy = EconomyKernel(economy_state, economy_config)
         self.geometry = GridGeometry.from_config(economy_config)
+        self.creature_material = creature_material_state
+        self.creature_material.validate(self.body.alive)
+        initial_matter = self.matter_totals()
+        if not bool(initial_matter.raw_reservoirs_valid.all()):
+            raise ValueError("whole-world inventory exceeds the configured safe reduction bound")
+        self._expected_matter_total_q = initial_matter.total_q.clone()
 
     def _require_matching_fluid(self, fluid: FluidSample) -> None:
         """`FluidSample` carries no validate(); a mis-shaped one silently broadcasts.
@@ -113,6 +134,30 @@ class HeadlessWorld:
         body = develop(self.genotype)
         self.body = replace(
             body, **{name: getattr(body, name).clone() for name in _ALIASED_BODY_FIELDS}
+        )
+        self.creature_material.validate(self.body.alive)
+
+    def matter_totals(self) -> MatterTotals:
+        """Read-only exact census of field and creature nutrient reservoirs."""
+        return matter_totals(
+            self.economy_state,
+            self.creature_material,
+            alive=self.body.alive,
+            field_shape=self.economy_config.shape,
+            max_inventory_q=self.economy_config.max_inventory_q,
+        )
+
+    @property
+    def expected_matter_total_q(self) -> torch.Tensor:
+        """Copy of the immutable per-world nutrient baseline."""
+        return self._expected_matter_total_q.clone()
+
+    def close_matter_step(self, before: MatterTotals) -> WholeWorldMatterLedger:
+        """Close the authoritative whole-world nutrient ledger after one tick."""
+        return close_world_matter(
+            expected_total_q=self._expected_matter_total_q,
+            before=before,
+            after=self.matter_totals(),
         )
 
     def _step_mechanics(self) -> LiveStepLedger:

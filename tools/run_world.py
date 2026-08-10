@@ -16,6 +16,7 @@ from pathlib import Path
 
 import torch
 
+from sirrobin.core.material import CreatureMaterialState
 from sirrobin.core.periodic_motion import DEFAULT_PERIODIC_MOTION_POLICY
 from sirrobin.core.runner import HeadlessRunner, WorldSchedule
 from sirrobin.core.world import HeadlessWorld
@@ -27,6 +28,11 @@ from sirrobin.physics.live_config import LiveLocomotionConfig
 
 FIXTURE = Path(__file__).resolve().parents[1] / "oracle/fixtures/live/donor_development_live.json"
 FIELD_NAMES = ("ND", "BP", "BD", "BM")
+# Declared starting-condition values for this operational fixture only. They make the
+# new authoritative stores visible without claiming a calibrated nutrient/body-mass
+# mapping before feeding or lifecycle consumes one.
+FIXTURE_STRUCTURE_Q_PER_BODY = 1_000
+FIXTURE_RESERVE_Q_PER_BODY = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +49,12 @@ class WorldRunReport:
     population: int
     initial_fields_q: tuple[int, int, int, int]
     final_fields_q: tuple[int, int, int, int]
+    initial_structure_q: int
+    initial_reserve_q: int
+    final_structure_q: int
+    final_reserve_q: int
+    initial_whole_world_q: int
+    final_whole_world_q: int
     books_closed: bool
     gait_time_min_s: float
     gait_time_max_s: float
@@ -99,6 +111,7 @@ def _build_fixture_world(
     economy_state.bp_q.fill_(1_000_000)
     economy_state.bd_q[..., 0] = 500_000
     lead = (1, bodies)
+    alive = genotype.alive
     return HeadlessWorld(
         genotype=genotype,
         fluid=FluidSample(
@@ -108,6 +121,11 @@ def _build_fixture_world(
         live_config=LiveLocomotionConfig(),
         economy_state=economy_state,
         economy_config=economy_config,
+        creature_material_state=CreatureMaterialState.uniform_live(
+            alive,
+            structure_q_per_creature=FIXTURE_STRUCTURE_Q_PER_BODY,
+            reserve_q_per_creature=FIXTURE_RESERVE_Q_PER_BODY,
+        ),
     )
 
 
@@ -149,6 +167,7 @@ def run_world(
     if not math.isclose(seconds, intervals * interval_s, rel_tol=1.0e-12, abs_tol=1.0e-12):
         raise ValueError(f"seconds must be an exact multiple of the fixture interval {interval_s:g}")
     initial_fields_q = _field_totals_q(world.economy_state)
+    initial_matter = world.matter_totals()
     if device.type == "cuda":
         torch.cuda.synchronize(device)
     setup_wall_time_s = time.perf_counter() - setup_started
@@ -168,7 +187,7 @@ def run_world(
     periodic_projected_relative_work_error = 0.0
     for _ in range(intervals):
         tick = runner.advance()
-        books_closed &= bool(tick.economy.books_closed.all())
+        books_closed &= bool(tick.matter.books_closed.all())
         mechanics_steps += tick.mechanics_steps
         full_batch_mechanics_steps += tick.full_batch_mechanics_steps
         representative_mechanics_steps += tick.representative_mechanics_steps
@@ -201,6 +220,7 @@ def run_world(
     positions = world.live_state.position_enu_m.reshape(-1, 3)
     sample = positions[: min(8, positions.shape[0])].detach().cpu().tolist()
     shipped_schedule = WorldSchedule.from_configs(LiveLocomotionConfig(), EconomyConfig())
+    final_matter = world.matter_totals()
     return WorldRunReport(
         requested_sim_time_s=seconds,
         sim_time_s=world.sim_time_s,
@@ -216,6 +236,12 @@ def run_world(
         population=int(world.body.alive.sum().item()),
         initial_fields_q=initial_fields_q,
         final_fields_q=_field_totals_q(world.economy_state),
+        initial_structure_q=int(initial_matter.structure_q.sum().item()),
+        initial_reserve_q=int(initial_matter.reserve_q.sum().item()),
+        final_structure_q=int(final_matter.structure_q.sum().item()),
+        final_reserve_q=int(final_matter.reserve_q.sum().item()),
+        initial_whole_world_q=int(initial_matter.total_q.sum().item()),
+        final_whole_world_q=int(final_matter.total_q.sum().item()),
         books_closed=books_closed,
         gait_time_min_s=float(gait_time.min().item()),
         gait_time_max_s=float(gait_time.max().item()),
@@ -265,9 +291,15 @@ def format_report(report: WorldRunReport) -> str:
             f"population: {report.population}",
             f"initial field totals q: {_fields_line(report.initial_fields_q)}",
             f"final field totals q: {_fields_line(report.final_fields_q)}",
-            f"initial total q: {sum(report.initial_fields_q)}",
-            f"final total q: {sum(report.final_fields_q)}",
-            f"exact books closed: {'yes' if report.books_closed else 'no'}",
+            f"initial field total q: {sum(report.initial_fields_q)}",
+            f"final field total q: {sum(report.final_fields_q)}",
+            "initial creature totals q: "
+            f"structure={report.initial_structure_q} reserve={report.initial_reserve_q}",
+            "final creature totals q: "
+            f"structure={report.final_structure_q} reserve={report.final_reserve_q}",
+            f"initial whole-world total q: {report.initial_whole_world_q}",
+            f"final whole-world total q: {report.final_whole_world_q}",
+            f"exact whole-world books closed: {'yes' if report.books_closed else 'no'}",
             f"integrated mechanical work J: {report.mechanical_work_j:.9g}",
             "periodic projected drift totals across economy intervals: "
             f"translation={report.periodic_projected_translation_drift_m:.9g} m "
