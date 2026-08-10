@@ -22,6 +22,11 @@ from sirrobin.core.feeding import (
     PopulationFeedingReport,
     feed_population,
 )
+from sirrobin.core.foraging import (
+    FoodSeekingConfig,
+    FoodSeekingReport,
+    apply_food_seeking_intent,
+)
 from sirrobin.core.material import WholeWorldMatterLedger
 from sirrobin.core.metabolism import (
     MaintenanceConfig,
@@ -69,6 +74,8 @@ class WorldTick:
     substep only. `mechanical_work_j` integrates named dissipated power across actual
     and verified repeated cycles; it is observation, not yet a creature-energy debit.
     `economy` proves the field subsystem conserved its own reaction/transport step.
+    `food_seeking` records the sampled cause and requested action before mechanics;
+    it does not report or require navigation success.
     `feeding`, when explicitly enabled, records the later field-to-creature transfer;
     `matter` is the authoritative field-plus-creature baseline ledger over both.
     """
@@ -79,6 +86,7 @@ class WorldTick:
     fast_forwarded_mechanics_steps: int
     sim_time_s: float
     economy: EconomyStepLedger
+    food_seeking: FoodSeekingReport | None
     feeding: PopulationFeedingReport | None
     maintenance: MaintenanceReport | None
     matter: WholeWorldMatterLedger
@@ -95,12 +103,14 @@ class HeadlessRunner:
         world: HeadlessWorld,
         *,
         periodic_policy: PeriodicMotionPolicy | None = None,
+        food_seeking_config: FoodSeekingConfig | None = None,
         feeding_config: FeedingConfig | None = None,
         maintenance_config: MaintenanceConfig | None = None,
     ) -> None:
         self.world = world
         self.schedule = WorldSchedule.from_configs(world.live_config, world.economy_config)
         self.periodic_policy = periodic_policy
+        self.food_seeking_config = food_seeking_config
         self.feeding_config = feeding_config
         if maintenance_config is not None and int(world.body.alive.sum().item()) > 1:
             raise ValueError("maintenance currently supports at most one live creature")
@@ -140,7 +150,21 @@ class HeadlessRunner:
                 f"{failed} (invalid raw reservoir state)"
             )
         try:
-            mechanics = advance_mechanics_interval(self.world, steps, self.periodic_policy)
+            food_seeking = (
+                apply_food_seeking_intent(self.world, self.food_seeking_config)
+                if self.food_seeking_config is not None and live_count > 0
+                else None
+            )
+            mechanics = advance_mechanics_interval(
+                self.world,
+                steps,
+                self.periodic_policy,
+                effort_fraction=(
+                    None
+                    if food_seeking is None
+                    else food_seeking.requested_effort_fraction
+                ),
+            )
             economy_ledger = self.world._step_economy()
             if not bool(economy_ledger.books_closed.all()):
                 failed = (~economy_ledger.books_closed).nonzero().flatten().tolist()
@@ -189,6 +213,7 @@ class HeadlessRunner:
             fast_forwarded_mechanics_steps=mechanics.fast_forwarded_steps,
             sim_time_s=sim_time_s,
             economy=economy_ledger,
+            food_seeking=food_seeking,
             feeding=feeding,
             maintenance=maintenance,
             matter=matter_ledger,

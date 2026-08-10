@@ -154,7 +154,10 @@ def _same_pose_normalized_state(value: torch.Tensor) -> bool:
 
 
 def _can_share_representative(
-    body: DevelopedBody, state: LiveState, fluid: FluidSample
+    body: DevelopedBody,
+    state: LiveState,
+    fluid: FluidSample,
+    effort_fraction: torch.Tensor | None,
 ) -> bool:
     if body.worlds != 1 or not bool(body.alive.all()):
         return False
@@ -167,6 +170,11 @@ def _can_share_representative(
         return False
     if not bool((fluid.velocity_enu_m_s == 0.0).all()):
         return False
+    if effort_fraction is not None:
+        if tuple(effort_fraction.shape) != tuple(body.alive.shape):
+            return False
+        if not _same_across_capacity(effort_fraction):
+            return False
     scalar_state = (
         state.gait_time_s,
         state.yaw_momentum_kg_m2_s,
@@ -297,11 +305,15 @@ def _worst_error(errors: list[PeriodicErrorEstimate]) -> PeriodicErrorEstimate:
     )
 
 
-def _full_advance(world, steps: int) -> MechanicsAdvance:
+def _full_advance(
+    world,
+    steps: int,
+    effort_fraction: torch.Tensor | None,
+) -> MechanicsAdvance:
     work = torch.zeros_like(world.body.mass_sim.sum(-1))
     ledger = None
     for _ in range(steps):
-        ledger = world._step_mechanics()
+        ledger = world._step_mechanics(effort_fraction)
         work += ledger.total.dissipated_power_w.reshape_as(work) * world.live_config.dt
     if ledger is None:
         raise ValueError("mechanics advance requires at least one step")
@@ -312,17 +324,24 @@ def advance_mechanics_interval(
     world,
     steps: int,
     policy: PeriodicMotionPolicy | None,
+    *,
+    effort_fraction: torch.Tensor | None = None,
 ) -> MechanicsAdvance:
     """Cover one mechanics interval, fast-forwarding only a verified clone orbit."""
     if steps < 1:
         raise ValueError("mechanics interval must contain at least one step")
     if policy is None:
-        return _full_advance(world, steps)
-    if not _can_share_representative(world.body, world.live_state, world.fluid):
-        return _full_advance(world, steps)
+        return _full_advance(world, steps, effort_fraction)
+    if not _can_share_representative(
+        world.body,
+        world.live_state,
+        world.fluid,
+        effort_fraction,
+    ):
+        return _full_advance(world, steps, effort_fraction)
     frequency = float(world.body.swim_freq_hz[0, 0].item())
     if not math.isfinite(frequency) or frequency <= 0.0:
-        return _full_advance(world, steps)
+        return _full_advance(world, steps, effort_fraction)
     period_steps = round(1.0 / (frequency * world.live_config.dt))
     if period_steps < 1 or not math.isclose(
         period_steps * world.live_config.dt * frequency,
@@ -330,13 +349,16 @@ def advance_mechanics_interval(
         rel_tol=0.0,
         abs_tol=1.0e-12,
     ):
-        return _full_advance(world, steps)
+        return _full_advance(world, steps, effort_fraction)
     whole_cycles, remainder_steps = divmod(steps, period_steps)
     if whole_cycles <= policy.max_detection_cycles + 1:
-        return _full_advance(world, steps)
+        return _full_advance(world, steps, effort_fraction)
 
     body, representative, fluid = _slice_representative(
         world.body, world.live_state, world.fluid
+    )
+    representative_effort = (
+        None if effort_fraction is None else effort_fraction[:, :1]
     )
     initial_position = world.live_state.position_enu_m.clone()
     initial_yaw = world.live_state.yaw_rad.clone()
@@ -354,7 +376,13 @@ def advance_mechanics_interval(
         yaw_before = representative.yaw_rad.clone()
         cycle_work = torch.zeros_like(representative.yaw_rad)
         for _ in range(period_steps):
-            last_ledger = step_live(body, representative, fluid, world.live_config)
+            last_ledger = step_live(
+                body,
+                representative,
+                fluid,
+                world.live_config,
+                effort_fraction=representative_effort,
+            )
             representative.position_enu_m.add_(
                 representative.velocity_rel_water_enu_m_s * world.live_config.dt
             )
@@ -394,13 +422,13 @@ def advance_mechanics_interval(
             accepted_window.clear()
         previous = current
     else:
-        return _full_advance(world, steps)
+        return _full_advance(world, steps, effort_fraction)
 
     if current is None or last_ledger is None or accepted_error is None:
-        return _full_advance(world, steps)
+        return _full_advance(world, steps, effort_fraction)
     skipped_cycles = whole_cycles - detected_cycles - 1
     if skipped_cycles <= 0:
-        return _full_advance(world, steps)
+        return _full_advance(world, steps, effort_fraction)
     skipped_translation, skipped_yaw = repeat_transform(
         current.translation_body_m, current.yaw_delta_rad, skipped_cycles
     )
@@ -439,7 +467,7 @@ def advance_mechanics_interval(
     ).clone()
     full_steps = period_steps + remainder_steps
     for _ in range(full_steps):
-        last_ledger = world._step_mechanics()
+        last_ledger = world._step_mechanics(effort_fraction)
         work += (
             last_ledger.total.dissipated_power_w.reshape_as(work)
             * world.live_config.dt

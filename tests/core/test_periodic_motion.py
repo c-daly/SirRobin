@@ -10,10 +10,12 @@ import pytest
 import torch
 
 import sirrobin.core.periodic_motion as periodic_motion
+from sirrobin.core.foraging import FoodSeekingConfig
 from sirrobin.core.material import CreatureMaterialState, MaterialEnergyConfig
 from sirrobin.core.periodic_motion import (
     PeriodicErrorEstimate,
     PeriodicMotionPolicy,
+    advance_mechanics_interval,
     repeat_transform,
 )
 from sirrobin.core.runner import HeadlessRunner
@@ -112,6 +114,38 @@ def test_exact_zero_clones_cover_every_step_and_fast_forward_without_motion() ->
     assert tick.periodic_error.projected_relative_work_error == 0.0
     assert torch.equal(world.economy_state.total_per_world(), before_total)
     assert tick.economy.books_closed.all()
+
+
+def test_equal_zero_food_effort_remains_periodic_eligible() -> None:
+    world = _world(("root-only", "root-only"), interval_s=4.0)
+
+    tick = HeadlessRunner(
+        world,
+        periodic_policy=_test_policy(),
+        food_seeking_config=FoodSeekingConfig(1.0),
+    ).advance()
+
+    assert tick.food_seeking is not None
+    assert torch.equal(
+        tick.food_seeking.requested_effort_fraction,
+        torch.zeros((1, 2), dtype=torch.float64),
+    )
+    assert tick.fast_forwarded_mechanics_steps > 0
+
+
+def test_different_efforts_disable_shared_representative() -> None:
+    world = _world(("root-only", "root-only"), interval_s=4.0)
+
+    mechanics = advance_mechanics_interval(
+        world,
+        480,
+        _test_policy(),
+        effort_fraction=torch.tensor([[0.0, 1.0]], dtype=torch.float64),
+    )
+
+    assert mechanics.full_batch_steps == 480
+    assert mechanics.representative_steps == 0
+    assert mechanics.fast_forwarded_steps == 0
 
 
 def test_canonical_mechanics_is_the_runner_default_until_policy_is_explicit() -> None:

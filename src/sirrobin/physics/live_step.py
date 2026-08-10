@@ -26,14 +26,33 @@ def step_live(
     state: LiveState,
     fluid: FluidSample,
     config: LiveLocomotionConfig,
+    *,
+    effort_fraction: torch.Tensor | None = None,
 ) -> LiveStepLedger:
     config.validate()
+    if effort_fraction is not None:
+        if not isinstance(effort_fraction, torch.Tensor):
+            raise TypeError("effort_fraction must be a tensor")
+        if tuple(effort_fraction.shape) != tuple(body.alive.shape):
+            raise ValueError("effort_fraction must match the live population shape")
+        if not torch.is_floating_point(effort_fraction):
+            raise TypeError("effort_fraction must be floating point")
+        if effort_fraction.device != body.alive.device:
+            raise ValueError("effort_fraction must be on the live-state device")
+        if not bool(
+            (
+                torch.isfinite(effort_fraction)
+                & (effort_fraction >= 0.0)
+                & (effort_fraction <= 1.0)
+            ).all()
+        ):
+            raise ValueError("effort_fraction must be finite and in [0,1]")
     alive = _flat(body.alive, 0)
     t0 = _flat(state.gait_time_s, 0)
     t1 = t0 + config.dt
     turn = _flat(state.turn_bias_rad_per_depth, 0)
-    pose0 = resolve_live_pose(body, t0, turn)
-    pose1 = resolve_live_pose(body, t1, turn)
+    pose0 = resolve_live_pose(body, t0, turn, effort=effort_fraction)
+    pose1 = resolve_live_pose(body, t1, turn, effort=effort_fraction)
     hydro = hydrodynamic_contribution(
         body,
         state,

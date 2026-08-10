@@ -198,7 +198,9 @@ class HeadlessWorld:
             after=self.matter_totals(),
         )
 
-    def _step_mechanics(self) -> LiveStepLedger:
+    def _step_mechanics(
+        self, effort_fraction: torch.Tensor | None = None
+    ) -> LiveStepLedger:
         """Advance live mechanics by one frozen locomotion dt. Driven by the runner."""
         return advance_live_world(
             self.body,
@@ -206,6 +208,7 @@ class HeadlessWorld:
             self.fluid,
             self.live_config,
             self.geometry,
+            effort_fraction=effort_fraction,
         )
 
     def _step_economy(self) -> EconomyStepLedger:

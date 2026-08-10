@@ -40,10 +40,17 @@ def advance_live_world(
     geometry: GridGeometry,
     *,
     requested_heading_enu: torch.Tensor | None = None,
+    effort_fraction: torch.Tensor | None = None,
 ) -> LiveStepLedger:
     if requested_heading_enu is not None:
         update_heading_controller(body, state, requested_heading_enu, config)
-    ledger = step_live(body, state, fluid, config)
+    ledger = step_live(
+        body,
+        state,
+        fluid,
+        config,
+        effort_fraction=effort_fraction,
+    )
     transport = state.velocity_rel_water_enu_m_s + fluid.velocity_enu_m_s
     next_xy = state.position_enu_m[..., :2] + transport[..., :2] * config.dt
     wrapped_x = torch.remainder(next_xy[..., 0], geometry.lx_m)
