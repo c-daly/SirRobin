@@ -360,8 +360,8 @@ def test_runner_feeds_before_maintenance_and_closes_the_combined_tick() -> None:
     tick = runner.advance()
 
     assert tick.feeding is not None
-    assert tick.maintenance is not None
-    assert tick.maintenance.reserve_before_q == (
+    assert len(tick.maintenance) == 1
+    assert tick.maintenance[0].reserve_before_q == (
         500 + tick.feeding.reserve_credit_q
     )
     assert tick.matter.books_closed.tolist() == [True]
@@ -377,11 +377,11 @@ def test_runner_can_continue_an_empty_world_after_one_time_starvation_death() ->
     death_tick = runner.advance()
     empty_tick = runner.advance()
 
-    assert death_tick.maintenance is not None
-    assert death_tick.maintenance.starved is True
-    assert death_tick.maintenance.death_dissipation_j > 0.0
+    assert len(death_tick.maintenance) == 1
+    assert death_tick.maintenance[0].starved is True
+    assert death_tick.maintenance[0].death_dissipation_j > 0.0
     assert death_tick.matter.books_closed.tolist() == [True]
-    assert empty_tick.maintenance is None
+    assert empty_tick.maintenance == ()
     assert empty_tick.matter.books_closed.tolist() == [True]
     assert world.body.alive.sum().item() == 0
     assert world.sim_time_s == 0.2

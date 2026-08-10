@@ -137,8 +137,9 @@ def run_first_lifecycle_scenario(
         viable_steps = step
         tick = viable_runner.advance()
         viable_books_closed &= bool(tick.matter.books_closed.all())
-        if tick.feeding is None or tick.maintenance is None:
+        if tick.feeding is None or len(tick.maintenance) != 1:
             raise RuntimeError("viable lifecycle arm omitted feeding or maintenance")
+        maintenance = tick.maintenance[0]
         feeding_events += 1
         producer_debit_q += tick.feeding.actual_debit_q
         reserve_credit_q += tick.feeding.reserve_credit_q
@@ -152,10 +153,10 @@ def run_first_lifecycle_scenario(
         assimilation_heat_j = math.fsum(
             (assimilation_heat_j, tick.feeding.assimilation_heat_j)
         )
-        maintenance_debit_q += tick.maintenance.debit_q
-        maintenance_return_q += tick.maintenance.maintenance_return_q
+        maintenance_debit_q += maintenance.debit_q
+        maintenance_return_q += maintenance.maintenance_return_q
         maintenance_heat_j = math.fsum(
-            (maintenance_heat_j, tick.maintenance.maintenance_heat_j)
+            (maintenance_heat_j, maintenance.maintenance_heat_j)
         )
         required_q = int(viable_world.creature_material.structure_q[0, 0])
         required_q += birth_config.initial_reserve_q
@@ -256,8 +257,8 @@ def run_first_lifecycle_scenario(
         tick = starved_runner.advance()
         starved_books_closed &= bool(tick.matter.books_closed.all())
         predeath_production_q += int(tick.economy.production_q.sum().item())
-        if tick.maintenance is not None and tick.maintenance.starved:
-            death_report = tick.maintenance
+        if tick.maintenance and tick.maintenance[0].starved:
+            death_report = tick.maintenance[0]
             break
     if death_report is None:
         raise RuntimeError(

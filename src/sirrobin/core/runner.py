@@ -31,12 +31,17 @@ from sirrobin.core.material import WholeWorldMatterLedger
 from sirrobin.core.metabolism import (
     MaintenanceConfig,
     MaintenanceReport,
-    maintain_single_creature,
+    maintain_population,
 )
 from sirrobin.core.periodic_motion import (
     PeriodicErrorEstimate,
     PeriodicMotionPolicy,
     advance_mechanics_interval,
+)
+from sirrobin.core.reproduction import (
+    BirthConfig,
+    BirthReport,
+    attempt_exact_clone_birth,
 )
 from sirrobin.core.world import HeadlessWorld
 from sirrobin.economy.config import EconomyConfig
@@ -76,8 +81,11 @@ class WorldTick:
     `economy` proves the field subsystem conserved its own reaction/transport step.
     `food_seeking` records the sampled cause and requested action before mechanics;
     it does not report or require navigation success.
-    `feeding`, when explicitly enabled, records the later field-to-creature transfer;
-    `matter` is the authoritative field-plus-creature baseline ledger over both.
+    `feeding`, when explicitly enabled, records the later field-to-creature transfer.
+    `maintenance` records every organism settled from the tick-start population;
+    `births` records funded attempts by surviving tick-start parents. Newborns cannot
+    reproduce until a later tick. `matter` is the authoritative field-plus-creature
+    baseline ledger over every transaction.
     """
 
     mechanics_steps: int
@@ -88,7 +96,8 @@ class WorldTick:
     economy: EconomyStepLedger
     food_seeking: FoodSeekingReport | None
     feeding: PopulationFeedingReport | None
-    maintenance: MaintenanceReport | None
+    maintenance: tuple[MaintenanceReport, ...]
+    births: tuple[BirthReport, ...]
     matter: WholeWorldMatterLedger
     last_mechanics_substep: LiveStepLedger
     mechanical_work_j: torch.Tensor
@@ -106,15 +115,15 @@ class HeadlessRunner:
         food_seeking_config: FoodSeekingConfig | None = None,
         feeding_config: FeedingConfig | None = None,
         maintenance_config: MaintenanceConfig | None = None,
+        birth_config: BirthConfig | None = None,
     ) -> None:
         self.world = world
         self.schedule = WorldSchedule.from_configs(world.live_config, world.economy_config)
         self.periodic_policy = periodic_policy
         self.food_seeking_config = food_seeking_config
         self.feeding_config = feeding_config
-        if maintenance_config is not None and int(world.body.alive.sum().item()) > 1:
-            raise ValueError("maintenance currently supports at most one live creature")
         self.maintenance_config = maintenance_config
+        self.birth_config = birth_config
         self._books_failed = False
 
     def advance(self) -> WorldTick:
@@ -137,9 +146,25 @@ class HeadlessRunner:
                 "developed body identity cache differs from genotype authority"
             )
         live_count = int(self.world.body.alive.sum().item())
-        if self.maintenance_config is not None and live_count > 1:
-            self._books_failed = True
-            raise RuntimeError("maintenance supports at most one live creature before the tick")
+        birth_parents = tuple(
+            sorted(
+                [
+                    (
+                        int(world_index),
+                        int(creature_slot),
+                        int(
+                            self.world.genotype.stable_id[
+                                world_index, creature_slot
+                            ]
+                        ),
+                    )
+                    for world_index, creature_slot in self.world.body.alive.nonzero(
+                        as_tuple=False
+                    ).tolist()
+                ],
+                key=lambda parent: (parent[0], parent[2], parent[1]),
+            )
+        )
         steps = self.schedule.mechanics_steps_per_economy_step
         matter_before = self.world.matter_totals()
         if not bool(matter_before.raw_reservoirs_valid.all()):
@@ -175,14 +200,44 @@ class HeadlessRunner:
                 else None
             )
             maintenance = (
-                maintain_single_creature(
+                maintain_population(
                     self.world,
                     self.maintenance_config,
                     last_mechanics_substep=mechanics.last_ledger,
                 )
                 if self.maintenance_config is not None
-                else None
+                else ()
             )
+            births: list[BirthReport] = []
+            if self.birth_config is not None:
+                for world_index, parent_slot, parent_id in birth_parents:
+                    if not bool(self.world.genotype.alive[world_index, parent_slot]):
+                        continue
+                    if (
+                        int(self.world.genotype.stable_id[world_index, parent_slot])
+                        != parent_id
+                    ):
+                        continue
+                    structure_q = int(
+                        self.world.creature_material.structure_q[
+                            world_index, parent_slot
+                        ]
+                    )
+                    reserve_q = int(
+                        self.world.creature_material.reserve_q[
+                            world_index, parent_slot
+                        ]
+                    )
+                    if reserve_q < structure_q + self.birth_config.initial_reserve_q:
+                        continue
+                    births.append(
+                        attempt_exact_clone_birth(
+                            self.world,
+                            self.birth_config,
+                            world_index=world_index,
+                            parent_slot=parent_slot,
+                        )
+                    )
             matter_ledger = self.world.close_matter_step(matter_before)
             if not bool(matter_ledger.books_closed.all()):
                 failed = (~matter_ledger.books_closed).nonzero().flatten().tolist()
@@ -216,6 +271,7 @@ class HeadlessRunner:
             food_seeking=food_seeking,
             feeding=feeding,
             maintenance=maintenance,
+            births=tuple(births),
             matter=matter_ledger,
             last_mechanics_substep=mechanics.last_ledger,
             mechanical_work_j=mechanics.mechanical_work_j,

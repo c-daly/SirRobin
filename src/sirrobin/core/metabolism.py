@@ -36,6 +36,7 @@ class MaintenanceReport:
 
     world_index: int
     creature_slot: int
+    creature_id: int
     structural_mass_kg: float
     interval_s: float
     maintenance_w_per_kg: float
@@ -74,29 +75,27 @@ def _quantize_energy_demand(
     return int(requested_q), carry_j
 
 
-def maintain_single_creature(
+def _maintain_creature(
     world: HeadlessWorld,
     config: MaintenanceConfig,
     *,
+    world_index: int,
+    creature_slot: int,
+    structural_mass_kg: float | None = None,
     last_mechanics_substep: LiveStepLedger | None = None,
-) -> MaintenanceReport | None:
-    """Pay mass-derived maintenance, or die and return all remaining material.
-
-    Population settlement remains deliberately out of scope until shared-stock
-    interaction. A dead world is a stable no-op, which makes the death return
-    intrinsically one-time.
-    """
-    live_locations = world.body.alive.nonzero(as_tuple=False)
-    if live_locations.shape[0] > 1:
-        raise ValueError("maintenance currently supports at most one live creature")
-    if live_locations.shape[0] == 0:
-        return None
-    world_index, creature_slot = (int(value) for value in live_locations[0].tolist())
+) -> MaintenanceReport:
+    """Settle one explicitly selected live creature."""
+    if not bool(world.body.alive[world_index, creature_slot]):
+        raise ValueError("maintenance target must be alive")
+    creature_id = int(world.genotype.stable_id[world_index, creature_slot].item())
     energy_per_q = world.material_energy_config.reserve_j_per_q
-    morphology = query_morphology(world.body, world.live_config)
-    mass_kg = float(
-        morphology.structural_mass_kg[world_index, creature_slot].item()
-    )
+    if structural_mass_kg is None:
+        morphology = query_morphology(world.body, world.live_config)
+        mass_kg = float(
+            morphology.structural_mass_kg[world_index, creature_slot].item()
+        )
+    else:
+        mass_kg = structural_mass_kg
     carry_before_j = float(
         world.creature_material.maintenance_carry_j[
             world_index, creature_slot
@@ -195,6 +194,7 @@ def maintain_single_creature(
     return MaintenanceReport(
         world_index=world_index,
         creature_slot=creature_slot,
+        creature_id=creature_id,
         structural_mass_kg=mass_kg,
         interval_s=world.economy_config.dt_eco_s,
         maintenance_w_per_kg=config.maintenance_w_per_kg,
@@ -210,4 +210,65 @@ def maintain_single_creature(
         maintenance_heat_j=debit_q * energy_per_q,
         death_dissipation_j=death_dissipation_j,
         starved=starved,
+    )
+
+
+def maintain_single_creature(
+    world: HeadlessWorld,
+    config: MaintenanceConfig,
+    *,
+    last_mechanics_substep: LiveStepLedger | None = None,
+) -> MaintenanceReport | None:
+    """Pay maintenance for a world containing at most one live creature."""
+    live_locations = world.body.alive.nonzero(as_tuple=False)
+    if live_locations.shape[0] > 1:
+        raise ValueError("single-creature maintenance requires at most one live creature")
+    if live_locations.shape[0] == 0:
+        return None
+    world_index, creature_slot = (int(value) for value in live_locations[0].tolist())
+    return _maintain_creature(
+        world,
+        config,
+        world_index=world_index,
+        creature_slot=creature_slot,
+        last_mechanics_substep=last_mechanics_substep,
+    )
+
+
+def maintain_population(
+    world: HeadlessWorld,
+    config: MaintenanceConfig,
+    *,
+    last_mechanics_substep: LiveStepLedger | None = None,
+) -> tuple[MaintenanceReport, ...]:
+    """Settle every creature alive at the start in stable-ID order.
+
+    A starvation death clears its slot immediately, but the start-of-settlement
+    census prevents either duplicate settlement or processing any later occupant
+    of that slot in the same tick.
+    """
+    locations = [
+        (int(world_index), int(creature_slot))
+        for world_index, creature_slot in world.body.alive.nonzero(as_tuple=False).tolist()
+    ]
+    locations.sort(
+        key=lambda location: (
+            location[0],
+            int(world.genotype.stable_id[location].item()),
+            location[1],
+        )
+    )
+    morphology = query_morphology(world.body, world.live_config)
+    return tuple(
+        _maintain_creature(
+            world,
+            config,
+            world_index=world_index,
+            creature_slot=creature_slot,
+            structural_mass_kg=float(
+                morphology.structural_mass_kg[world_index, creature_slot].item()
+            ),
+            last_mechanics_substep=last_mechanics_substep,
+        )
+        for world_index, creature_slot in locations
     )

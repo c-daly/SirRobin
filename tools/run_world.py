@@ -319,14 +319,14 @@ def run_world(
             feeding_reserve_credit_q += tick.feeding.reserve_credit_q
             feeding_dissolved_return_q += tick.feeding.dissolved_return_q
             feeding_assimilation_heat_j += tick.feeding.assimilation_heat_j
-        if tick.maintenance is not None:
-            maintenance_events += 1
-            maintenance_reserve_debit_q += tick.maintenance.debit_q
-            maintenance_dissolved_return_q += tick.maintenance.maintenance_return_q
-            death_return_q += tick.maintenance.death_return_q
-            maintenance_heat_j += tick.maintenance.maintenance_heat_j
-            death_dissipation_j += tick.maintenance.death_dissipation_j
-            starvation_deaths += int(tick.maintenance.starved)
+        maintenance_events += len(tick.maintenance)
+        for maintenance in tick.maintenance:
+            maintenance_reserve_debit_q += maintenance.debit_q
+            maintenance_dissolved_return_q += maintenance.maintenance_return_q
+            death_return_q += maintenance.death_return_q
+            maintenance_heat_j += maintenance.maintenance_heat_j
+            death_dissipation_j += maintenance.death_dissipation_j
+            starvation_deaths += int(maintenance.starved)
     birth_report = None
     if birth_one:
         birth_before = world.matter_totals()
