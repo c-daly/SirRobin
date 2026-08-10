@@ -16,7 +16,8 @@ from pathlib import Path
 
 import torch
 
-from sirrobin.core.material import CreatureMaterialState
+from sirrobin.core.feeding import FeedingConfig
+from sirrobin.core.material import CreatureMaterialState, MaterialEnergyConfig
 from sirrobin.core.periodic_motion import DEFAULT_PERIODIC_MOTION_POLICY
 from sirrobin.core.runner import HeadlessRunner, WorldSchedule
 from sirrobin.core.world import HeadlessWorld
@@ -33,6 +34,14 @@ FIELD_NAMES = ("ND", "BP", "BD", "BM")
 # mapping before feeding or lifecycle consumes one.
 FIXTURE_STRUCTURE_Q_PER_BODY = 1_000
 FIXTURE_RESERVE_Q_PER_BODY = 500
+FIXTURE_FEEDING_CONFIG = FeedingConfig(
+    capture_efficiency=0.5,
+    assimilation_efficiency=0.5,
+)
+FIXTURE_MATERIAL_ENERGY_CONFIG = MaterialEnergyConfig(
+    producer_j_per_q=0.50,
+    reserve_j_per_q=0.45,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +65,17 @@ class WorldRunReport:
     initial_whole_world_q: int
     final_whole_world_q: int
     books_closed: bool
+    feeding_enabled: bool
+    feeding_events: int
+    feeding_producer_debit_q: int
+    feeding_reserve_credit_q: int
+    feeding_dissolved_return_q: int
+    feeding_assimilation_heat_j: float
+    final_intake_carry_mol: float
+    final_assimilation_carry_q: float
+    producer_j_per_q: float
+    reserve_j_per_q: float
+    final_assimilation_carry_energy_j: float
     gait_time_min_s: float
     gait_time_max_s: float
     positions_sample_enu_m: tuple[tuple[float, float, float], ...]
@@ -126,6 +146,7 @@ def _build_fixture_world(
             structure_q_per_creature=FIXTURE_STRUCTURE_Q_PER_BODY,
             reserve_q_per_creature=FIXTURE_RESERVE_Q_PER_BODY,
         ),
+        material_energy_config=FIXTURE_MATERIAL_ENERGY_CONFIG,
     )
 
 
@@ -135,11 +156,14 @@ def run_world(
     bodies: int,
     device_name: str,
     economy_interval_s: float = 0.1,
+    feed_one: bool = False,
 ) -> WorldRunReport:
     if not math.isfinite(seconds) or seconds <= 0.0:
         raise ValueError("seconds must be positive and finite")
     if bodies <= 0:
         raise ValueError("bodies must be positive")
+    if feed_one and bodies != 1:
+        raise ValueError("one-creature feeding requires exactly one body")
     if not math.isfinite(economy_interval_s) or economy_interval_s <= 0.0:
         raise ValueError("economy_interval_s must be positive and finite")
     try:
@@ -161,6 +185,7 @@ def run_world(
     runner = HeadlessRunner(
         world,
         periodic_policy=DEFAULT_PERIODIC_MOTION_POLICY,
+        feeding_config=FIXTURE_FEEDING_CONFIG if feed_one else None,
     )
     interval_s = world.economy_config.dt_eco_s
     intervals = round(seconds / interval_s)
@@ -185,6 +210,11 @@ def run_world(
     periodic_projected_velocity_error_m_s = 0.0
     periodic_projected_yaw_momentum_error_kg_m2_s = 0.0
     periodic_projected_relative_work_error = 0.0
+    feeding_events = 0
+    feeding_producer_debit_q = 0
+    feeding_reserve_credit_q = 0
+    feeding_dissolved_return_q = 0
+    feeding_assimilation_heat_j = 0.0
     for _ in range(intervals):
         tick = runner.advance()
         books_closed &= bool(tick.matter.books_closed.all())
@@ -212,6 +242,12 @@ def run_world(
             periodic_projected_relative_work_error += (
                 tick.periodic_error.projected_relative_work_error
             )
+        if tick.feeding is not None:
+            feeding_events += 1
+            feeding_producer_debit_q += tick.feeding.actual_debit_q
+            feeding_reserve_credit_q += tick.feeding.reserve_credit_q
+            feeding_dissolved_return_q += tick.feeding.dissolved_return_q
+            feeding_assimilation_heat_j += tick.feeding.assimilation_heat_j
     if device.type == "cuda":
         torch.cuda.synchronize(device)
     advance_wall_time_s = time.perf_counter() - advance_started
@@ -243,6 +279,24 @@ def run_world(
         initial_whole_world_q=int(initial_matter.total_q.sum().item()),
         final_whole_world_q=int(final_matter.total_q.sum().item()),
         books_closed=books_closed,
+        feeding_enabled=feed_one,
+        feeding_events=feeding_events,
+        feeding_producer_debit_q=feeding_producer_debit_q,
+        feeding_reserve_credit_q=feeding_reserve_credit_q,
+        feeding_dissolved_return_q=feeding_dissolved_return_q,
+        feeding_assimilation_heat_j=feeding_assimilation_heat_j,
+        final_intake_carry_mol=float(
+            world.creature_material.intake_carry_mol.sum().item()
+        ),
+        final_assimilation_carry_q=float(
+            world.creature_material.assimilation_carry_q.sum().item()
+        ),
+        producer_j_per_q=world.material_energy_config.producer_j_per_q,
+        reserve_j_per_q=world.material_energy_config.reserve_j_per_q,
+        final_assimilation_carry_energy_j=float(
+            world.creature_material.assimilation_carry_q.sum().item()
+            * world.material_energy_config.reserve_j_per_q
+        ),
         gait_time_min_s=float(gait_time.min().item()),
         gait_time_max_s=float(gait_time.max().item()),
         positions_sample_enu_m=tuple(tuple(float(value) for value in row) for row in sample),
@@ -300,6 +354,20 @@ def format_report(report: WorldRunReport) -> str:
             f"initial whole-world total q: {report.initial_whole_world_q}",
             f"final whole-world total q: {report.final_whole_world_q}",
             f"exact whole-world books closed: {'yes' if report.books_closed else 'no'}",
+            "one-creature feeding enabled: "
+            f"{'yes' if report.feeding_enabled else 'no'}",
+            f"feeding events: {report.feeding_events}",
+            f"feeding producer debit q: {report.feeding_producer_debit_q}",
+            f"feeding reserve credit q: {report.feeding_reserve_credit_q}",
+            f"feeding dissolved return q: {report.feeding_dissolved_return_q}",
+            f"feeding assimilation heat J: {report.feeding_assimilation_heat_j:.9g}",
+            f"final feeding intake carry mol: {report.final_intake_carry_mol:.9g}",
+            "final feeding assimilation carry q: "
+            f"{report.final_assimilation_carry_q:.9g}",
+            f"producer chemical energy density J/q: {report.producer_j_per_q:.9g}",
+            f"reserve chemical energy density J/q: {report.reserve_j_per_q:.9g}",
+            "final feeding assimilation carry energy J: "
+            f"{report.final_assimilation_carry_energy_j:.9g}",
             f"integrated mechanical work J: {report.mechanical_work_j:.9g}",
             "periodic projected drift totals across economy intervals: "
             f"translation={report.periodic_projected_translation_drift_m:.9g} m "
@@ -330,6 +398,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bodies", type=int, default=2)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--economy-interval", type=float, default=0.1)
+    parser.add_argument(
+        "--feed-one",
+        action="store_true",
+        help="enable the scoped one-live-creature feeding transaction",
+    )
     arguments = parser.parse_args(argv)
     try:
         report = run_world(
@@ -337,6 +410,7 @@ def main(argv: list[str] | None = None) -> int:
             bodies=arguments.bodies,
             device_name=arguments.device,
             economy_interval_s=arguments.economy_interval,
+            feed_one=arguments.feed_one,
         )
     except ValueError as error:
         parser.error(str(error))

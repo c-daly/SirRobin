@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from sirrobin.core.material import CreatureMaterialState
+from sirrobin.core.material import CreatureMaterialState, MaterialEnergyConfig
 from sirrobin.core.runner import HeadlessRunner
 from sirrobin.core.world import HeadlessWorld
 from sirrobin.economy.config import EconomyConfig
@@ -19,6 +19,7 @@ from sirrobin.physics.contracts import FluidSample
 from sirrobin.physics.live_config import LiveLocomotionConfig
 
 FIXTURE = Path("oracle/fixtures/live/donor_development_live.json")
+TEST_ENERGY = MaterialEnergyConfig(0.50, 0.45)
 
 
 def _world(
@@ -27,6 +28,7 @@ def _world(
     reserve_q: tuple[int, ...] = (500, 250),
     second_alive: bool = True,
     material: CreatureMaterialState | None = None,
+    energy: object = TEST_ENERGY,
 ) -> HeadlessWorld:
     rows = json.loads(FIXTURE.read_text(encoding="utf-8"))["bodies"]
     swimmer = next(row for row in rows if row["id"] == "swimmer")
@@ -53,9 +55,12 @@ def _world(
     economy.bp_q.fill_(1_000_000)
     economy.bd_q[..., 0] = 500_000
     if material is None:
+        carry = torch.zeros((1, capacity), dtype=torch.float64)
         material = CreatureMaterialState(
             structure_q=torch.tensor([structure_q], dtype=torch.int64),
             reserve_q=torch.tensor([reserve_q], dtype=torch.int64),
+            intake_carry_mol=carry.clone(),
+            assimilation_carry_q=carry.clone(),
         )
     return HeadlessWorld(
         genotype=genotype,
@@ -67,6 +72,7 @@ def _world(
         economy_state=economy,
         economy_config=config,
         creature_material_state=material,
+        material_energy_config=energy,
     )
 
 
@@ -101,6 +107,12 @@ def test_complete_tick_closes_raw_field_plus_creature_sums_exactly() -> None:
     assert torch.equal(world.creature_material.reserve_q, torch.tensor([[500, 250]]))
 
 
+@pytest.mark.parametrize("invalid", [None, "not-an-energy-config"])
+def test_world_requires_runtime_material_energy_authority(invalid: object) -> None:
+    with pytest.raises(TypeError, match="MaterialEnergyConfig"):
+        _world(energy=invalid)
+
+
 def test_explicit_zero_material_state_has_population_shape() -> None:
     world = _world(structure_q=(0, 0), reserve_q=(0, 0))
 
@@ -124,6 +136,8 @@ def test_malformed_creature_material_is_rejected(
     values = {
         "structure_q": torch.tensor([[1, 1]], dtype=torch.int64),
         "reserve_q": torch.tensor([[1, 1]], dtype=torch.int64),
+        "intake_carry_mol": torch.zeros((1, 2), dtype=torch.float64),
+        "assimilation_carry_q": torch.zeros((1, 2), dtype=torch.float64),
     }
     values[field] = value
 
@@ -135,6 +149,8 @@ def test_inactive_capacity_cannot_hide_material() -> None:
     material = CreatureMaterialState(
         structure_q=torch.tensor([[1, 1]], dtype=torch.int64),
         reserve_q=torch.tensor([[0, 0]], dtype=torch.int64),
+        intake_carry_mol=torch.zeros((1, 2), dtype=torch.float64),
+        assimilation_carry_q=torch.zeros((1, 2), dtype=torch.float64),
     )
 
     with pytest.raises(ValueError, match="inactive"):
@@ -145,6 +161,8 @@ def test_whole_world_inventory_respects_the_safe_exact_reduction_bound() -> None
     material = CreatureMaterialState(
         structure_q=torch.tensor([[10**15, 0]], dtype=torch.int64),
         reserve_q=torch.zeros((1, 2), dtype=torch.int64),
+        intake_carry_mol=torch.zeros((1, 2), dtype=torch.float64),
+        assimilation_carry_q=torch.zeros((1, 2), dtype=torch.float64),
     )
 
     with pytest.raises(ValueError, match="whole-world inventory"):
@@ -190,7 +208,10 @@ def test_int64_wrap_cannot_disguise_a_post_initialization_mint() -> None:
         runner.advance()
 
 
-@pytest.mark.parametrize("corruption", ["fractional_reserve", "reserve_shape", "field_dtype"])
+@pytest.mark.parametrize(
+    "corruption",
+    ["fractional_reserve", "reserve_shape", "field_dtype", "invalid_intake_carry"],
+)
 def test_runtime_reservoir_schema_corruption_arrests_before_reduction(
     corruption: str,
 ) -> None:
@@ -200,6 +221,8 @@ def test_runtime_reservoir_schema_corruption_arrests_before_reduction(
         world.creature_material.reserve_q = torch.tensor([[500.0, 250.5]])
     elif corruption == "reserve_shape":
         world.creature_material.reserve_q = torch.tensor([500, 250], dtype=torch.int64)
+    elif corruption == "invalid_intake_carry":
+        world.creature_material.intake_carry_mol[0, 0] = float("nan")
     else:
         world.economy_state.bp_q = world.economy_state.bp_q.to(torch.float64)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 
@@ -46,6 +47,39 @@ def test_run_world_reports_authoritative_state_and_measured_cost() -> None:
     assert "positions sample ENU m (2/2):" in completed.stdout
     assert "wall time s:" in completed.stdout
     assert "simulated seconds / wall second:" in completed.stdout
+
+
+def test_run_world_can_explicitly_enable_one_creature_feeding() -> None:
+    completed = _run_world(
+        "--seconds", "0.1", "--bodies", "1", "--device", "cpu", "--feed-one"
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "one-creature feeding enabled: yes" in completed.stdout
+    assert "feeding events: 1" in completed.stdout
+    debit = int(re.search(r"feeding producer debit q: (\d+)", completed.stdout).group(1))
+    reserve = int(re.search(r"feeding reserve credit q: (\d+)", completed.stdout).group(1))
+    dissolved = int(
+        re.search(r"feeding dissolved return q: (\d+)", completed.stdout).group(1)
+    )
+    assert debit > 0
+    assert reserve > 0
+    assert dissolved > 0
+    assert debit == reserve + dissolved
+    assert "feeding assimilation heat J: " in completed.stdout
+    assert "final feeding intake carry mol: " in completed.stdout
+    assert "final feeding assimilation carry q: " in completed.stdout
+    assert "producer chemical energy density J/q: 0.5" in completed.stdout
+    assert "reserve chemical energy density J/q: 0.45" in completed.stdout
+    assert "final feeding assimilation carry energy J: " in completed.stdout
+    assert "exact whole-world books closed: yes" in completed.stdout
+
+
+def test_run_world_rejects_feeding_without_the_scoped_population() -> None:
+    completed = _run_world("--seconds", "0.1", "--bodies", "2", "--feed-one")
+
+    assert completed.returncode != 0
+    assert "exactly one body" in completed.stderr
 
 
 @pytest.mark.parametrize(

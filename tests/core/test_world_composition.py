@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from sirrobin.core.material import CreatureMaterialState
+from sirrobin.core.material import CreatureMaterialState, MaterialEnergyConfig
 from sirrobin.core.runner import HeadlessRunner, WorldSchedule
 from sirrobin.core.world import HeadlessWorld
 from sirrobin.economy.config import EconomyConfig
@@ -68,6 +68,7 @@ def _world() -> HeadlessWorld:
         economy_state=state,
         economy_config=config,
         creature_material_state=CreatureMaterialState.zeros_like(genotype.alive),
+        material_energy_config=MaterialEnergyConfig(0.50, 0.45),
     )
 
 

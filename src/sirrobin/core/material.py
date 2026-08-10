@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import torch
@@ -10,18 +11,37 @@ from sirrobin.economy.state import EconomyState
 from sirrobin.numerics.flux import INT64_SAFE_MAX
 
 
+@dataclass(frozen=True, slots=True)
+class MaterialEnergyConfig:
+    """World-owned chemical-energy densities for persistent material stocks."""
+
+    producer_j_per_q: float
+    reserve_j_per_q: float
+
+    def __post_init__(self) -> None:
+        values = (self.producer_j_per_q, self.reserve_j_per_q)
+        if any(not isinstance(value, (int, float)) or isinstance(value, bool) for value in values):
+            raise TypeError("material energy densities must be real numbers")
+        if any(not math.isfinite(value) or value <= 0.0 for value in values):
+            raise ValueError("material energy densities must be finite and positive")
+
+
 @dataclass(slots=True)
 class CreatureMaterialState:
     """Tracked limiting nutrient held by fixed-capacity creature slots."""
 
     structure_q: torch.Tensor
     reserve_q: torch.Tensor
+    intake_carry_mol: torch.Tensor
+    assimilation_carry_q: torch.Tensor
 
     @classmethod
     def zeros_like(cls, alive: torch.Tensor) -> CreatureMaterialState:
         return cls(
             torch.zeros_like(alive, dtype=torch.int64),
             torch.zeros_like(alive, dtype=torch.int64),
+            torch.zeros_like(alive, dtype=torch.float64),
+            torch.zeros_like(alive, dtype=torch.float64),
         )
 
     @classmethod
@@ -48,13 +68,19 @@ class CreatureMaterialState:
                 torch.full_like(alive, reserve_q_per_creature, dtype=torch.int64),
                 torch.zeros_like(alive, dtype=torch.int64),
             ),
+            torch.zeros_like(alive, dtype=torch.float64),
+            torch.zeros_like(alive, dtype=torch.float64),
         )
 
     @property
     def reservoirs(self) -> tuple[torch.Tensor, torch.Tensor]:
         return self.structure_q, self.reserve_q
 
-    def validate(self, alive: torch.Tensor) -> None:
+    @property
+    def carries(self) -> tuple[torch.Tensor, torch.Tensor]:
+        return self.intake_carry_mol, self.assimilation_carry_q
+
+    def validate(self, alive: torch.Tensor, *, q_mass_mol: float) -> None:
         expected = tuple(alive.shape)
         for name, reservoir in zip(
             ("structure_q", "reserve_q"), self.reservoirs, strict=True
@@ -71,6 +97,22 @@ class CreatureMaterialState:
                 raise ValueError(f"{name} must remain below 2^62")
             if torch.any((~alive) & (reservoir != 0)):
                 raise ValueError(f"{name} cannot assign material to an inactive slot")
+        for name, carry, upper in zip(
+            ("intake_carry_mol", "assimilation_carry_q"),
+            self.carries,
+            (q_mass_mol, 1.0),
+            strict=True,
+        ):
+            if carry.dtype != torch.float64:
+                raise TypeError(f"{name} must be float64")
+            if tuple(carry.shape) != expected:
+                raise ValueError(f"{name} must have shape {expected}")
+            if carry.device != alive.device:
+                raise ValueError(f"{name} must be on the creature-state device")
+            if torch.any(~torch.isfinite(carry)) or torch.any((carry < 0) | (carry >= upper)):
+                raise ValueError(f"{name} must remain in [0,{upper})")
+            if torch.any((~alive) & (carry != 0)):
+                raise ValueError(f"{name} cannot assign carry to an inactive slot")
 
     def total_per_world(self) -> torch.Tensor:
         return self.structure_q.sum(dim=1, dtype=torch.int64) + self.reserve_q.sum(
@@ -109,6 +151,7 @@ def matter_totals(
     alive: torch.Tensor,
     field_shape: tuple[int, int, int, int],
     max_inventory_q: int,
+    q_mass_mol: float,
 ) -> MatterTotals:
     worlds = int(alive.shape[0])
     device = alive.device
@@ -149,6 +192,19 @@ def matter_totals(
         valid &= ((reservoir == 0) | alive).all(dim=1)
         approximate_total += reservoir.to(torch.float64).sum(dim=1)
         creature_totals.append(reservoir.sum(dim=1, dtype=torch.int64))
+    for carry, upper in zip(creatures.carries, (q_mass_mol, 1.0), strict=True):
+        schema_valid = (
+            isinstance(carry, torch.Tensor)
+            and carry.dtype == torch.float64
+            and tuple(carry.shape) == tuple(alive.shape)
+            and carry.device == device
+        )
+        if not schema_valid:
+            valid.fill_(False)
+            continue
+        valid &= torch.isfinite(carry).all(dim=1)
+        valid &= ((carry >= 0) & (carry < upper)).all(dim=1)
+        valid &= ((carry == 0) | alive).all(dim=1)
     valid &= approximate_total < max_inventory_q
 
     # The exact reductions are trusted only when the raw census above proves their

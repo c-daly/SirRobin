@@ -23,9 +23,9 @@ Simulation time belongs to the core. Nothing here depends on a render frame and 
 whole module runs without Unity.
 
 Tracked creature structure and reserve are a separate integer authority from physical
-body mass. The whole-world baseline sums them with the four field reservoirs. No
-feeding or lifecycle transfer exists yet; this seam makes those transfers possible
-without giving either subsystem a second global ledger.
+body mass. The whole-world baseline sums them with the four field reservoirs. The
+optional one-creature feeding transaction crosses that seam; later lifecycle transfers
+must use it without giving either subsystem a second global ledger.
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ import torch
 from sirrobin.core.live_world import advance_live_world, initialize_live_state
 from sirrobin.core.material import (
     CreatureMaterialState,
+    MaterialEnergyConfig,
     MatterTotals,
     WholeWorldMatterLedger,
     close_world_matter,
@@ -70,6 +71,7 @@ class HeadlessWorld:
         economy_state: EconomyState,
         economy_config: EconomyConfig,
         creature_material_state: CreatureMaterialState,
+        material_energy_config: MaterialEnergyConfig,
     ) -> None:
         live_config.validate()
         economy_config.validate()
@@ -91,7 +93,12 @@ class HeadlessWorld:
         self.economy = EconomyKernel(economy_state, economy_config)
         self.geometry = GridGeometry.from_config(economy_config)
         self.creature_material = creature_material_state
-        self.creature_material.validate(self.body.alive)
+        self.creature_material.validate(
+            self.body.alive, q_mass_mol=economy_config.q_mass_mol
+        )
+        if not isinstance(material_energy_config, MaterialEnergyConfig):
+            raise TypeError("material_energy_config must be MaterialEnergyConfig")
+        self._material_energy_config = material_energy_config
         initial_matter = self.matter_totals()
         if not bool(initial_matter.raw_reservoirs_valid.all()):
             raise ValueError("whole-world inventory exceeds the configured safe reduction bound")
@@ -129,13 +136,20 @@ class HeadlessWorld:
         """Read-only view of the authoritative ecological clock."""
         return float(self.economy.state.time_s)
 
+    @property
+    def material_energy_config(self) -> MaterialEnergyConfig:
+        """Immutable world binding for producer and reserve chemical energy."""
+        return self._material_energy_config
+
     def rebuild_body(self) -> None:
         """Regenerate the developed-body cache from the genotype authority."""
         body = develop(self.genotype)
         self.body = replace(
             body, **{name: getattr(body, name).clone() for name in _ALIASED_BODY_FIELDS}
         )
-        self.creature_material.validate(self.body.alive)
+        self.creature_material.validate(
+            self.body.alive, q_mass_mol=self.economy_config.q_mass_mol
+        )
 
     def matter_totals(self) -> MatterTotals:
         """Read-only exact census of field and creature nutrient reservoirs."""
@@ -145,6 +159,7 @@ class HeadlessWorld:
             alive=self.body.alive,
             field_shape=self.economy_config.shape,
             max_inventory_q=self.economy_config.max_inventory_q,
+            q_mass_mol=self.economy_config.q_mass_mol,
         )
 
     @property
