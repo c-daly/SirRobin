@@ -24,7 +24,7 @@ whole module runs without Unity.
 
 Tracked creature structure and reserve are a separate integer authority from physical
 body mass. The whole-world baseline sums them with the four field reservoirs. The
-one-creature feeding and maintenance transactions and paid exact-clone birth cross that
+population feeding, maintenance, and paid exact-clone birth transactions cross that
 seam; later lifecycle depth must use it without giving either subsystem a second global
 ledger.
 """

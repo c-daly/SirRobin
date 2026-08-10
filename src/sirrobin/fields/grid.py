@@ -33,9 +33,10 @@ class ScalarGrid:
             q_mass_mol=self.q_mass_mol,
         )
 
-    def _point_stencil(
+    def point_stencil(
         self, position_m: torch.Tensor
     ) -> tuple[list[tuple[int, int, int]], torch.Tensor]:
+        """Return merged positive-weight cells for a continuous position."""
         position = position_m.to(
             device=self._reservoir_q.device, dtype=torch.float64
         ).reshape(1, 3)
@@ -77,7 +78,7 @@ class ScalarGrid:
         """Return exact stock on the positive-weight point stencil."""
         if not 0 <= world < self._reservoir_q.shape[0]:
             raise ValueError("invalid world")
-        indices, _ = self._point_stencil(position_m)
+        indices, _ = self.point_stencil(position_m)
         values = [int(self._reservoir_q[world, *index].item()) for index in indices]
         if any(value < 0 or value >= INT64_SAFE_MAX for value in values):
             raise ValueError("local reservoir stock is outside the [0,2^62) domain")
@@ -90,7 +91,7 @@ class ScalarGrid:
         """Sample one selected position without evaluating inactive capacity slots."""
         if not 0 <= world < self._reservoir_q.shape[0]:
             raise ValueError("invalid world")
-        indices, weights = self._point_stencil(position_m)
+        indices, weights = self.point_stencil(position_m)
         values = torch.stack(
             [self._reservoir_q[world, *index] for index in indices]
         )
@@ -107,7 +108,7 @@ class ScalarGrid:
         """Synthetic single-point transaction; not a biological grazing API."""
         if not 0 <= world < self._reservoir_q.shape[0] or requested_q < 0:
             raise ValueError("invalid world or request")
-        indices, weight_tensor = self._point_stencil(position_m)
+        indices, weight_tensor = self.point_stencil(position_m)
         available = torch.stack([self._reservoir_q[world, *index] for index in indices])
         if bool(torch.any((available < 0) | (available >= INT64_SAFE_MAX))):
             raise ValueError("local reservoir stock is outside the [0,2^62) domain")
@@ -138,7 +139,7 @@ class ScalarGrid:
 
     def deposit_at(self, world: int, position_m: torch.Tensor, amount_q: int) -> int:
         """Credit an exact integer amount across the local trilinear stencil."""
-        indices, credit = self._deposit_plan(world, position_m, amount_q)
+        indices, credit = self.deposit_plan(world, position_m, amount_q)
         for index, value in zip(indices, credit, strict=True):
             self._reservoir_q[world, *index] += value
         return int(credit.sum().item())
@@ -147,16 +148,17 @@ class ScalarGrid:
         self, world: int, position_m: torch.Tensor, amount_q: int
     ) -> None:
         """Validate a future local credit without changing the reservoir."""
-        self._deposit_plan(world, position_m, amount_q)
+        self.deposit_plan(world, position_m, amount_q)
 
-    def _deposit_plan(
+    def deposit_plan(
         self, world: int, position_m: torch.Tensor, amount_q: int
     ) -> tuple[list[tuple[int, int, int]], torch.Tensor]:
+        """Return a validated exact local credit without applying it."""
         if not 0 <= world < self._reservoir_q.shape[0] or amount_q < 0:
             raise ValueError("invalid world or amount")
         if amount_q >= INT64_SAFE_MAX:
             raise ValueError("amount must remain below 2^62")
-        indices, weights = self._point_stencil(position_m)
+        indices, weights = self.point_stencil(position_m)
         credit = apportion_integer(
             torch.tensor(amount_q, dtype=torch.int64, device=self._reservoir_q.device),
             weights,

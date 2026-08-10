@@ -17,7 +17,11 @@ from dataclasses import dataclass
 
 import torch
 
-from sirrobin.core.feeding import FeedingConfig, FeedingReport, feed_single_creature
+from sirrobin.core.feeding import (
+    FeedingConfig,
+    PopulationFeedingReport,
+    feed_population,
+)
 from sirrobin.core.material import WholeWorldMatterLedger
 from sirrobin.core.metabolism import (
     MaintenanceConfig,
@@ -75,7 +79,7 @@ class WorldTick:
     fast_forwarded_mechanics_steps: int
     sim_time_s: float
     economy: EconomyStepLedger
-    feeding: FeedingReport | None
+    feeding: PopulationFeedingReport | None
     maintenance: MaintenanceReport | None
     matter: WholeWorldMatterLedger
     last_mechanics_substep: LiveStepLedger
@@ -97,8 +101,6 @@ class HeadlessRunner:
         self.world = world
         self.schedule = WorldSchedule.from_configs(world.live_config, world.economy_config)
         self.periodic_policy = periodic_policy
-        if feeding_config is not None and int(world.body.alive.sum().item()) != 1:
-            raise ValueError("feeding currently requires exactly one live creature")
         self.feeding_config = feeding_config
         if maintenance_config is not None and int(world.body.alive.sum().item()) > 1:
             raise ValueError("maintenance currently supports at most one live creature")
@@ -115,10 +117,16 @@ class HeadlessRunner:
         """
         if self._books_failed:
             raise RuntimeError("this world is arrested; it is not resumable")
-        live_count = int(self.world.body.alive.sum().item())
-        if self.feeding_config is not None and live_count > 1:
+        if not torch.equal(
+            self.world.body.alive, self.world.genotype.alive
+        ) or not torch.equal(
+            self.world.body.stable_id, self.world.genotype.stable_id
+        ):
             self._books_failed = True
-            raise RuntimeError("feeding requires exactly one live creature before the tick")
+            raise RuntimeError(
+                "developed body identity cache differs from genotype authority"
+            )
+        live_count = int(self.world.body.alive.sum().item())
         if self.maintenance_config is not None and live_count > 1:
             self._books_failed = True
             raise RuntimeError("maintenance supports at most one live creature before the tick")
@@ -138,8 +146,8 @@ class HeadlessRunner:
                 failed = (~economy_ledger.books_closed).nonzero().flatten().tolist()
                 raise RuntimeError(f"exact nutrient books do not close in worlds {failed}")
             feeding = (
-                feed_single_creature(self.world, self.feeding_config)
-                if self.feeding_config is not None and live_count == 1
+                feed_population(self.world, self.feeding_config)
+                if self.feeding_config is not None and live_count > 0
                 else None
             )
             maintenance = (

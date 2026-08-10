@@ -315,14 +315,14 @@ def test_inactive_out_of_domain_position_cannot_abort_selected_live_sample() -> 
     assert report.actual_debit_q > 0
 
 
-def test_runner_revalidates_population_scope_before_advancing_any_clock() -> None:
+def test_runner_rejects_corrupt_live_cache_before_advancing_any_clock() -> None:
     world = _world(bodies=2, live_bodies=1)
     runner = HeadlessRunner(world, feeding_config=_feeding_config())
     world.body.alive[0, 1] = True
     time_before = world.sim_time_s
     gait_before = world.live_state.gait_time_s.clone()
 
-    with pytest.raises(RuntimeError, match="exactly one live creature"):
+    with pytest.raises(RuntimeError, match="identity cache"):
         runner.advance()
 
     assert world.sim_time_s == time_before
@@ -390,9 +390,11 @@ def test_runner_composes_one_feeding_act_inside_whole_world_closure() -> None:
     assert tick.matter.total_before_q.tolist() == tick.matter.total_after_q.tolist()
 
 
-def test_feeding_rejects_population_contention_until_allocator_slice() -> None:
+def test_one_creature_api_still_rejects_population_shape() -> None:
+    world = _world(bodies=2)
+
     with pytest.raises(ValueError, match="exactly one live creature"):
-        HeadlessRunner(_world(bodies=2), feeding_config=_feeding_config())
+        feed_single_creature(world, _feeding_config())
 
 
 @pytest.mark.parametrize(
