@@ -132,6 +132,7 @@ def _build_fixture_world(
     material_energy_config: MaterialEnergyConfig | None = None,
     live_bodies: int | None = None,
     reserve_q_per_creature: int = FIXTURE_RESERVE_Q_PER_BODY,
+    economy_config: EconomyConfig | None = None,
 ) -> HeadlessWorld:
     if live_bodies is None:
         live_bodies = bodies
@@ -146,20 +147,28 @@ def _build_fixture_world(
     )
     genotype.alive[:, live_bodies:] = False
     genotype.stable_id[:, live_bodies:] = 0
-    economy_config = replace(
-        EconomyConfig(),
-        gx=1,
-        gy=1,
-        gz=4,
-        lx_m=10.0,
-        ly_m=10.0,
-        lz_m=20.0,
-        dt_eco_s=economy_interval_s,
-        remin_floor_s=max(
-            EconomyConfig().remin_floor_s,
-            1.0 / (100_000.0 * economy_interval_s),
-        ),
-    )
+    if economy_config is None:
+        economy_config = replace(
+            EconomyConfig(),
+            gx=1,
+            gy=1,
+            gz=4,
+            lx_m=10.0,
+            ly_m=10.0,
+            lz_m=20.0,
+            dt_eco_s=economy_interval_s,
+            remin_floor_s=max(
+                EconomyConfig().remin_floor_s,
+                1.0 / (100_000.0 * economy_interval_s),
+            ),
+        )
+    elif not math.isclose(
+        economy_config.dt_eco_s,
+        economy_interval_s,
+        rel_tol=1.0e-12,
+        abs_tol=1.0e-12,
+    ):
+        raise ValueError("fixture economy config must use the requested interval")
     economy_state = EconomyState.zeros(economy_config, device=device)
     economy_state.nd_q.fill_(10_000_000)
     economy_state.bp_q.fill_(1_000_000)
