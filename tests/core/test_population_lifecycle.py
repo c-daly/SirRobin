@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 
 from sirrobin.core.metabolism import MaintenanceConfig, maintain_population
@@ -84,6 +85,35 @@ def test_newborn_cannot_reproduce_in_its_birth_tick() -> None:
     assert int(world.body.alive.sum()) == 3
     assert len(second.births) == 1
     assert second.births[0].parent_id == first.births[0].parent_id
+
+
+def test_runner_clock_remains_valid_after_the_last_original_parent_dies() -> None:
+    world = _world(capacity=2, live=1, reserves=(2_000,))
+    runner = HeadlessRunner(
+        world,
+        maintenance_config=MaintenanceConfig(0.0),
+        birth_config=BirthConfig(initial_reserve_q=100),
+    )
+    first = runner.advance()
+    assert first.births[0].born is True
+    child_slot = first.births[0].child_slot
+    assert child_slot is not None
+
+    parent_reserve_q = int(world.creature_material.reserve_q[0, 0])
+    world.creature_material.reserve_q[0, 0] = 0
+    world.economy_state.nd_q[0, 0, 0, 0] += parent_reserve_q
+    world.economy_state.nd_q[0, 0, 0, 0] -= 1_000
+    world.creature_material.reserve_q[0, child_slot] += 1_000
+    runner.maintenance_config = MaintenanceConfig(10.0)
+    runner.birth_config = None
+
+    second = runner.advance()
+
+    assert second.maintenance[0].starved is True
+    assert world.body.alive.tolist() == [[False, True]]
+    assert world.sim_time_s == 0.2
+    assert world.live_state.gait_time_s[0, child_slot] == pytest.approx(0.1)
+    assert second.matter.books_closed.tolist() == [True]
 
 
 def test_birth_records_capacity_refusal_without_population_repair() -> None:

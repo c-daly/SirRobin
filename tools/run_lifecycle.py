@@ -11,7 +11,6 @@ import torch
 
 from sirrobin.core.feeding import FeedingConfig
 from sirrobin.core.metabolism import MaintenanceConfig
-from sirrobin.core.periodic_motion import DEFAULT_PERIODIC_MOTION_POLICY
 from sirrobin.core.reproduction import BirthConfig, BirthReport, attempt_exact_clone_birth
 from sirrobin.core.runner import HeadlessRunner
 from sirrobin.economy.config import EconomyConfig
@@ -20,6 +19,7 @@ from tools.run_world import (
     FIXTURE_FEEDING_CONFIG,
     FIXTURE_MAINTENANCE_CONFIG,
     FIXTURE_RESERVE_Q_PER_BODY,
+    LIVING_MATERIAL_ENERGY_CONFIG,
     _build_fixture_world,
 )
 
@@ -112,11 +112,11 @@ def run_first_lifecycle_scenario(
         reserve_q_per_creature=FIXTURE_RESERVE_Q_PER_BODY,
         device=device,
         economy_interval_s=0.1,
+        material_energy_config=LIVING_MATERIAL_ENERGY_CONFIG,
     )
     viable_initial = viable_world.matter_totals()
     viable_runner = HeadlessRunner(
         viable_world,
-        periodic_policy=DEFAULT_PERIODIC_MOTION_POLICY,
         feeding_config=feeding_config,
         maintenance_config=viable_maintenance_config,
     )
@@ -158,6 +158,8 @@ def run_first_lifecycle_scenario(
         maintenance_heat_j = math.fsum(
             (maintenance_heat_j, maintenance.maintenance_heat_j)
         )
+        if maintenance.starved:
+            break
         required_q = int(viable_world.creature_material.structure_q[0, 0])
         required_q += birth_config.initial_reserve_q
         if int(viable_world.creature_material.reserve_q[0, 0]) < required_q:
@@ -225,6 +227,7 @@ def run_first_lifecycle_scenario(
         reserve_q_per_creature=3,
         device=device,
         economy_interval_s=0.1,
+        material_energy_config=LIVING_MATERIAL_ENERGY_CONFIG,
         economy_config=recycling_economy,
     )
     # A causal recycling fixture: no dissolved nutrient, detritus, or microbes
@@ -245,18 +248,28 @@ def run_first_lifecycle_scenario(
     initial_reserve_q = int(starved_world.creature_material.reserve_q.sum().item())
     starved_runner = HeadlessRunner(
         starved_world,
-        periodic_policy=DEFAULT_PERIODIC_MOTION_POLICY,
         maintenance_config=starvation_maintenance_config,
     )
     death_report = None
     starved_books_closed = True
     steps_to_death = 0
     predeath_production_q = 0
+    starved_maintenance_return_q = 0
+    starved_maintenance_heat_j = 0.0
     for step in range(1, max_viable_steps + 1):
         steps_to_death = step
         tick = starved_runner.advance()
         starved_books_closed &= bool(tick.matter.books_closed.all())
         predeath_production_q += int(tick.economy.production_q.sum().item())
+        starved_maintenance_return_q += sum(
+            report.maintenance_return_q for report in tick.maintenance
+        )
+        starved_maintenance_heat_j = math.fsum(
+            (
+                starved_maintenance_heat_j,
+                *(report.maintenance_heat_j for report in tick.maintenance),
+            )
+        )
         if tick.maintenance and tick.maintenance[0].starved:
             death_report = tick.maintenance[0]
             break
@@ -285,9 +298,9 @@ def run_first_lifecycle_scenario(
         starved=death_report.starved,
         initial_structure_q=initial_structure_q,
         initial_reserve_q=initial_reserve_q,
-        maintenance_return_q=death_report.maintenance_return_q,
+        maintenance_return_q=starved_maintenance_return_q,
         death_return_q=death_report.death_return_q,
-        maintenance_heat_j=death_report.maintenance_heat_j,
+        maintenance_heat_j=starved_maintenance_heat_j,
         death_dissipation_j=death_report.death_dissipation_j,
         predeath_producer_recycling_q=predeath_production_q,
         post_death_recycling_steps=recycling_steps,
@@ -321,7 +334,8 @@ def format_report(report: LifecycleScenarioReport) -> str:
             f"viable assimilation heat J: {viable.feeding_assimilation_heat_j:.9g}",
             f"viable assimilation carry J: {viable.final_assimilation_carry_j:.9g}",
             f"viable maintenance debit q: {viable.maintenance_reserve_debit_q}",
-            f"viable maintenance heat J: {viable.maintenance_heat_j:.9g}",
+            "viable maintenance reserve chemical debit J: "
+            f"{viable.maintenance_heat_j:.9g}",
             f"viable birth succeeded: {'yes' if viable.birth.born else 'no'}",
             f"viable parent/child IDs: {viable.birth.parent_id} -> {viable.birth.child_id}",
             f"viable population: {viable.final_population}",
@@ -331,7 +345,8 @@ def format_report(report: LifecycleScenarioReport) -> str:
             f"starved death occurred: {'yes' if starved.starved else 'no'}",
             f"starved maintenance return q: {starved.maintenance_return_q}",
             f"starved death return q: {starved.death_return_q}",
-            f"starved maintenance heat J: {starved.maintenance_heat_j:.9g}",
+            "starved maintenance reserve chemical debit J: "
+            f"{starved.maintenance_heat_j:.9g}",
             f"starved death dissipation J: {starved.death_dissipation_j:.9g}",
             f"starved population: {starved.final_population}",
             "recycling kinetics: accelerated causal fixture",

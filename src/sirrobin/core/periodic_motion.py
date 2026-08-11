@@ -59,6 +59,8 @@ class MechanicsAdvance:
     representative_steps: int
     fast_forwarded_steps: int
     mechanical_work_j: torch.Tensor
+    positive_actuator_work_j: torch.Tensor | None
+    actuator_braking_work_j: torch.Tensor | None
     last_ledger: LiveStepLedger
     periodic_error: PeriodicErrorEstimate | None
 
@@ -311,13 +313,41 @@ def _full_advance(
     effort_fraction: torch.Tensor | None,
 ) -> MechanicsAdvance:
     work = torch.zeros_like(world.body.mass_sim.sum(-1))
+    positive_actuator_work = torch.zeros_like(work)
+    actuator_braking_work = torch.zeros_like(work)
     ledger = None
     for _ in range(steps):
         ledger = world._step_mechanics(effort_fraction)
-        work += ledger.total.dissipated_power_w.reshape_as(work) * world.live_config.dt
+        alive = world.body.alive
+        dissipated_power = torch.where(
+            alive,
+            ledger.total.dissipated_power_w.reshape_as(work),
+            0.0,
+        )
+        actuator_power = torch.where(
+            alive,
+            ledger.total.input_power_w.reshape_as(work),
+            0.0,
+        )
+        work += dissipated_power * world.live_config.dt
+        # Split each canonical substep before integration: this deliberately
+        # models no cross-substep actuator regeneration. Negative input becomes
+        # a named braking-heat output rather than a credit to chemical reserve.
+        positive_actuator_work += actuator_power.clamp_min(0.0) * world.live_config.dt
+        actuator_braking_work += (-actuator_power).clamp_min(0.0) * world.live_config.dt
     if ledger is None:
         raise ValueError("mechanics advance requires at least one step")
-    return MechanicsAdvance(steps, steps, 0, 0, work, ledger, None)
+    return MechanicsAdvance(
+        covered_steps=steps,
+        full_batch_steps=steps,
+        representative_steps=0,
+        fast_forwarded_steps=0,
+        mechanical_work_j=work,
+        positive_actuator_work_j=positive_actuator_work,
+        actuator_braking_work_j=actuator_braking_work,
+        last_ledger=ledger,
+        periodic_error=None,
+    )
 
 
 def advance_mechanics_interval(
@@ -473,11 +503,13 @@ def advance_mechanics_interval(
             * world.live_config.dt
         )
     return MechanicsAdvance(
-        steps,
-        full_steps,
-        detected_cycles * period_steps,
-        skipped_cycles * period_steps,
-        work,
-        last_ledger,
-        accepted_error,
+        covered_steps=steps,
+        full_batch_steps=full_steps,
+        representative_steps=detected_cycles * period_steps,
+        fast_forwarded_steps=skipped_cycles * period_steps,
+        mechanical_work_j=work,
+        positive_actuator_work_j=None,
+        actuator_braking_work_j=None,
+        last_ledger=last_ledger,
+        periodic_error=accepted_error,
     )

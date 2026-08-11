@@ -85,9 +85,9 @@ def test_run_world_rejects_feeding_without_the_scoped_population() -> None:
 def test_run_world_exposes_mass_derived_maintenance() -> None:
     completed = _run_world(
         "--seconds",
-        "1",
+        "0.1",
         "--economy-interval",
-        "1",
+        "0.1",
         "--bodies",
         "1",
         "--maintain-one",
@@ -103,7 +103,7 @@ def test_run_world_exposes_mass_derived_maintenance() -> None:
     assert debit > 0
     assert returned == debit
     assert "starvation deaths: 0" in completed.stdout
-    assert "maintenance heat J: " in completed.stdout
+    assert "maintenance reserve chemical debit J: " in completed.stdout
     assert "exact whole-world books closed: yes" in completed.stdout
 
 

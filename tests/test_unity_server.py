@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 
 from sirrobin.core.metabolism import MaintenanceConfig
@@ -79,6 +80,56 @@ def test_snapshot_does_not_render_inactive_capacity_slots() -> None:
     assert len(payload["creatures"]) == 1
     assert payload["births"] == 0
     assert payload["deaths"] == 0
+
+
+def test_snapshot_dissipation_uses_named_outputs_not_the_reserve_debit() -> None:
+    world = _build_fixture_world(
+        bodies=1,
+        device=torch.device("cpu"),
+        economy_interval_s=0.1,
+    )
+    tick = HeadlessRunner(
+        world,
+        maintenance_config=MaintenanceConfig(
+            0.0,
+            chemical_to_mechanical_efficiency=0.5,
+        ),
+    ).advance()
+
+    payload = _payload(
+        world,
+        tick,
+        parent_by_id={1: None},
+        born_at_s={1: 0.0},
+    )
+
+    maintenance = tick.maintenance[0]
+    expected_j = float(tick.mechanical_work_j.sum().item())
+    expected_j += maintenance.baseline_maintenance_demand_j
+    expected_j += maintenance.muscle_inefficiency_heat_j
+    expected_j += maintenance.actuator_braking_heat_j
+    expected_j += maintenance.death_dissipation_j
+    assert payload["energy"]["dissipation_j"] == pytest.approx(expected_j)
+    assert payload["energy"]["dissipation_j"] != pytest.approx(
+        float(tick.mechanical_work_j.sum().item())
+        + maintenance.maintenance_heat_j
+    )
+    gross_stored_j = (
+        int(world.economy_state.bp_q.sum())
+        * world.material_energy_config.producer_j_per_q
+        + int(world.creature_material.reserve_q.sum())
+        * world.material_energy_config.reserve_j_per_q
+    )
+    carry_asset_j = (
+        float(world.creature_material.assimilation_carry_q.sum())
+        * world.material_energy_config.reserve_j_per_q
+    )
+    carry_liability_j = float(world.creature_material.maintenance_carry_j.sum())
+    assert payload["energy"]["stored_chemical_j"] == pytest.approx(
+        gross_stored_j + carry_asset_j - carry_liability_j,
+        rel=0.0,
+        abs=1.0e-12,
+    )
 
 
 def test_descriptor_retains_the_existing_unity_protocol() -> None:

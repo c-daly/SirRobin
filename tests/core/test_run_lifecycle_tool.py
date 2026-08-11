@@ -24,7 +24,7 @@ def test_run_lifecycle_cli_reports_both_controlled_arms() -> None:
     assert "viable birth succeeded: yes" in completed.stdout
     assert "viable population: 2" in completed.stdout
     assert "viable assimilation heat J: " in completed.stdout
-    assert "viable maintenance heat J: " in completed.stdout
+    assert "viable maintenance reserve chemical debit J: " in completed.stdout
     assert "starved death occurred: yes" in completed.stdout
     assert "starved population: 0" in completed.stdout
     assert "starved death dissipation J: " in completed.stdout

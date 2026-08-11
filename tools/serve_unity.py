@@ -11,7 +11,6 @@ from dataclasses import replace
 
 import torch
 
-from sirrobin.core.periodic_motion import DEFAULT_PERIODIC_MOTION_POLICY
 from sirrobin.core.runner import HeadlessRunner, WorldTick
 from sirrobin.economy.config import EconomyConfig
 from sirrobin.physics.pose_live import resolve_live_pose
@@ -19,6 +18,7 @@ from tools.run_world import (
     FIXTURE_BIRTH_CONFIG,
     FIXTURE_FEEDING_CONFIG,
     FIXTURE_MAINTENANCE_CONFIG,
+    LIVING_MATERIAL_ENERGY_CONFIG,
     _build_fixture_world,
 )
 
@@ -127,6 +127,7 @@ def _build_server_world():
         device=torch.device("cpu"),
         economy_interval_s=ECONOMY_INTERVAL_S,
         economy_config=economy,
+        material_energy_config=LIVING_MATERIAL_ENERGY_CONFIG,
     )
     # An exact zero-sum redistribution makes local gradients visible without
     # minting nutrient or changing the fixture's mean producer concentration.
@@ -145,7 +146,6 @@ def _build_server_world():
 def _build_server_runner(world) -> HeadlessRunner:
     return HeadlessRunner(
         world,
-        periodic_policy=DEFAULT_PERIODIC_MOTION_POLICY,
         feeding_config=FIXTURE_FEEDING_CONFIG,
         maintenance_config=FIXTURE_MAINTENANCE_CONFIG,
         birth_config=FIXTURE_BIRTH_CONFIG,
@@ -228,13 +228,22 @@ def _payload(
     dissolved_grid = _horizontal_grid(world.economy_state.nd_q)
     producer_q = int(world.economy_state.bp_q.sum().item())
     reserve_q = int(world.creature_material.reserve_q.sum().item())
+    assimilation_carry_j = (
+        float(world.creature_material.assimilation_carry_q.sum().item())
+        * world.material_energy_config.reserve_j_per_q
+    )
+    maintenance_liability_j = float(
+        world.creature_material.maintenance_carry_j.sum().item()
+    )
     dissipation_j = 0.0
     if tick is not None:
         dissipation_j = math.fsum(
             (
                 float(tick.mechanical_work_j.sum().item()),
                 *(report.assimilation_heat_j for report in (() if tick.feeding is None else (tick.feeding,))),
-                *(report.maintenance_heat_j for report in tick.maintenance),
+                *(report.baseline_maintenance_demand_j for report in tick.maintenance),
+                *(report.muscle_inefficiency_heat_j for report in tick.maintenance),
+                *(report.actuator_braking_heat_j for report in tick.maintenance),
                 *(report.death_dissipation_j for report in tick.maintenance),
                 *(report.construction_heat_j for report in tick.births),
             )
@@ -257,6 +266,8 @@ def _payload(
             "stored_chemical_j": (
                 producer_q * world.material_energy_config.producer_j_per_q
                 + reserve_q * world.material_energy_config.reserve_j_per_q
+                + assimilation_carry_j
+                - maintenance_liability_j
             ),
             "kinetic_j": 0.0,
             "dissipation_j": dissipation_j,

@@ -31,9 +31,7 @@ from sirrobin.physics.live_config import LiveLocomotionConfig
 
 FIXTURE = Path(__file__).resolve().parents[1] / "oracle/fixtures/live/donor_development_live.json"
 FIELD_NAMES = ("ND", "BP", "BD", "BM")
-# Declared starting-condition values for this operational fixture only. They make the
-# new authoritative stores visible without claiming a calibrated nutrient/body-mass
-# mapping before feeding or lifecycle consumes one.
+# Declared starting-condition values for focused mechanism fixtures.
 FIXTURE_STRUCTURE_Q_PER_BODY = 1_000
 FIXTURE_RESERVE_Q_PER_BODY = 500
 FIXTURE_FEEDING_CONFIG = FeedingConfig(
@@ -43,6 +41,14 @@ FIXTURE_FEEDING_CONFIG = FeedingConfig(
 FIXTURE_MATERIAL_ENERGY_CONFIG = MaterialEnergyConfig(
     producer_j_per_q=0.50,
     reserve_j_per_q=0.45,
+)
+# The continuous living-loop fixture preserves the same 10:9 conversion ratio,
+# scaled after canonical mechanics showed that 0.45 J/q gives a 187 kg swimmer
+# less than one interval of usable chemical energy. This is an exploratory
+# operational scale, not a biological calibration or a viability threshold.
+LIVING_MATERIAL_ENERGY_CONFIG = MaterialEnergyConfig(
+    producer_j_per_q=1000.0 / 9.0,
+    reserve_j_per_q=100.0,
 )
 FIXTURE_MAINTENANCE_CONFIG = MaintenanceConfig(maintenance_w_per_kg=0.01)
 FIXTURE_BIRTH_CONFIG = BirthConfig(initial_reserve_q=100)
@@ -247,7 +253,9 @@ def run_world(
     # reviewed, explicit policy decision.
     runner = HeadlessRunner(
         world,
-        periodic_policy=DEFAULT_PERIODIC_MOTION_POLICY,
+        periodic_policy=(
+            None if maintain_one else DEFAULT_PERIODIC_MOTION_POLICY
+        ),
         feeding_config=FIXTURE_FEEDING_CONFIG if feed_one else None,
         maintenance_config=FIXTURE_MAINTENANCE_CONFIG if maintain_one else None,
     )
@@ -489,7 +497,8 @@ def format_report(report: WorldRunReport) -> str:
             "maintenance dissolved return q: "
             f"{report.maintenance_dissolved_return_q}",
             f"death material return q: {report.death_return_q}",
-            f"maintenance heat J: {report.maintenance_heat_j:.9g}",
+            "maintenance reserve chemical debit J: "
+            f"{report.maintenance_heat_j:.9g}",
             f"death dissipation J: {report.death_dissipation_j:.9g}",
             f"starvation deaths: {report.starvation_deaths}",
             "one paid exact-clone birth requested: "

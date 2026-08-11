@@ -379,9 +379,16 @@ def test_runner_can_continue_an_empty_world_after_one_time_starvation_death() ->
 
     assert len(death_tick.maintenance) == 1
     assert death_tick.maintenance[0].starved is True
-    assert death_tick.maintenance[0].death_dissipation_j > 0.0
+    assert death_tick.positive_actuator_work_j is not None
+    assert death_tick.positive_actuator_work_j.tolist() == [[0.0]]
+    assert death_tick.maintenance[0].death_dissipation_j == 0.0
     assert death_tick.matter.books_closed.tolist() == [True]
     assert empty_tick.maintenance == ()
+    assert empty_tick.positive_actuator_work_j is not None
+    assert empty_tick.actuator_braking_work_j is not None
+    assert not bool(empty_tick.positive_actuator_work_j.any())
+    assert not bool(empty_tick.actuator_braking_work_j.any())
+    assert not bool(empty_tick.mechanical_work_j.any())
     assert empty_tick.matter.books_closed.tolist() == [True]
     assert world.body.alive.sum().item() == 0
     assert world.sim_time_s == 0.2
