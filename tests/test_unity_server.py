@@ -46,6 +46,7 @@ from tools.serve_unity import (
     _stream_reference,
     _stream_runtime,
     _StreamCursor,
+    _TerminalDeliveryPending,
 )
 
 
@@ -187,6 +188,13 @@ class _CaptureConnection:
         self.messages.append(message)
 
 
+class _DisconnectBeforeFinalConnection(_CaptureConnection):
+    def sendall(self, message: bytes) -> None:
+        if self.messages:
+            raise BrokenPipeError("test client disconnected before final record")
+        super().sendall(message)
+
+
 def test_reference_stream_emits_one_final_extinction_record_before_return() -> None:
     world = _build_fixture_world(
         bodies=1,
@@ -245,6 +253,46 @@ def test_runtime_stream_emits_one_final_extinction_record_before_return() -> Non
     assert records[-1]["payload"]["deaths"] == INITIAL_BODIES
     assert records[-1]["payload"]["terminal"] == {"reason": "extinction"}
     assert records[-1]["payload"]["events"].count(EXTINCTION_EVENT) == 1
+
+
+def test_runtime_stream_retries_final_extinction_record_after_reconnect() -> None:
+    world = _build_server_world(device=torch.device("cpu"))
+    _seed_visible_baseline(world)
+    profile = replace(
+        EVOLUTION_DEMO_RUNTIME_PROFILE,
+        mortality=MortalityConfig(0.05, 0.05, seed=7),
+    )
+    backend = RuntimeUnityBackend.from_reference_fixture(
+        world,
+        compile_domains=False,
+        profile=profile,
+    )
+    cursor = _StreamCursor()
+
+    with pytest.raises(_TerminalDeliveryPending, match="extinction"):
+        _stream_runtime(
+            _DisconnectBeforeFinalConnection(),
+            backend,
+            cursor,
+            stream_every_steps=10,
+        )
+
+    assert not bool(backend.snapshot().alive.any())
+    reconnect = _CaptureConnection()
+    terminal_reason = _stream_runtime(
+        reconnect,
+        backend,
+        cursor,
+        stream_every_steps=10,
+    )
+    records = [json.loads(message) for message in reconnect.messages]
+
+    assert terminal_reason == "extinction"
+    assert len(records) == 1
+    assert records[0]["sequence"] == 3
+    assert records[0]["payload"]["population"] == 0
+    assert records[0]["payload"]["terminal"] == {"reason": "extinction"}
+    assert records[0]["payload"]["events"].count(EXTINCTION_EVENT) == 1
 
 
 def test_live_stream_identity_survives_reconnect_and_simulation_restart() -> None:

@@ -60,6 +60,10 @@ LIVE_AGE_MORTALITY_CONFIG = AgeMortalityConfig(
 )
 
 
+class _TerminalDeliveryPending(RuntimeError):
+    """The terminal state is authoritative but no client accepted its record."""
+
+
 @dataclass(slots=True)
 class _StreamCursor:
     """Monotonic live-record identity retained across client reconnects."""
@@ -82,6 +86,22 @@ class _StreamCursor:
 
 def _line(value: object) -> bytes:
     return (json.dumps(value, separators=(",", ":"), allow_nan=False) + "\n").encode()
+
+
+def _send_record(
+    connection,
+    message: bytes,
+    *,
+    terminal_reason: str | None = None,
+) -> None:
+    try:
+        connection.sendall(message)
+    except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError) as error:
+        if terminal_reason is not None:
+            raise _TerminalDeliveryPending(
+                f"{terminal_reason} record delivery remains pending"
+            ) from error
+        raise
 
 
 def _descriptor(
@@ -465,7 +485,8 @@ def _stream_reference(
 ) -> str | None:
     initially_extinct = not bool(world.body.alive.any())
     initial_events = [EXTINCTION_EVENT] if initially_extinct else None
-    connection.sendall(
+    _send_record(
+        connection,
         _line(
             _record(
                 world,
@@ -474,7 +495,8 @@ def _stream_reference(
                 interval_events=initial_events,
                 terminal_reason="extinction" if initially_extinct else None,
             )
-        )
+        ),
+        terminal_reason="extinction" if initially_extinct else None,
     )
     if initially_extinct:
         return "extinction"
@@ -501,7 +523,8 @@ def _stream_reference(
             continue
         sequence = cursor.next()
         frames_sent += 1
-        connection.sendall(
+        _send_record(
+            connection,
             _line(
                 _record(
                     world,
@@ -512,7 +535,8 @@ def _stream_reference(
                     interval_deaths=interval_deaths,
                     terminal_reason="extinction" if extinct else None,
                 )
-            )
+            ),
+            terminal_reason="extinction" if extinct else None,
         )
         if extinct:
             return "extinction"
@@ -541,7 +565,8 @@ def _stream_runtime(
 ) -> str | None:
     snapshot = backend.snapshot()
     initially_extinct = not bool(snapshot.alive.any())
-    connection.sendall(
+    _send_record(
+        connection,
         _line(
             _runtime_record(
                 snapshot,
@@ -552,7 +577,8 @@ def _stream_runtime(
                 visual_lineages=backend.visual_lineages,
                 terminal_reason="extinction" if initially_extinct else None,
             )
-        )
+        ),
+        terminal_reason="extinction" if initially_extinct else None,
     )
     if initially_extinct:
         return "extinction"
@@ -589,7 +615,8 @@ def _stream_runtime(
         snapshot = backend.snapshot()
         sequence = cursor.next()
         frames_sent += 1
-        connection.sendall(
+        _send_record(
+            connection,
             _line(
                 _runtime_record(
                     snapshot,
@@ -604,7 +631,8 @@ def _stream_runtime(
                     visual_lineages=backend.visual_lineages,
                     terminal_reason="extinction" if extinct else None,
                 )
-            )
+            ),
+            terminal_reason="extinction" if extinct else None,
         )
         if extinct:
             return "extinction"
@@ -836,6 +864,12 @@ def main() -> None:
                             cursor,
                             stream_every_steps=args.stream_every_steps,
                         )
+                except _TerminalDeliveryPending as error:
+                    print(
+                        f"Unity client disconnected: {error}; "
+                        "awaiting reconnect without advancing simulation",
+                        flush=True,
+                    )
                 except (
                     BrokenPipeError,
                     ConnectionResetError,
@@ -843,14 +877,6 @@ def main() -> None:
                     OSError,
                 ) as error:
                     print(f"Unity client disconnected: {error}", flush=True)
-                    runtime_extinct = backend is not None and not bool(
-                        backend.session.state.population.alive.any()
-                    )
-                    reference_extinct = backend is None and not bool(
-                        world.body.alive.any()
-                    )
-                    if runtime_extinct or reference_extinct:
-                        terminal_reason = "extinction"
                 finally:
                     connection.close()
                 if terminal_reason is not None:
