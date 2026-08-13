@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import replace
 
@@ -30,6 +31,7 @@ from tools.runtime_unity import (
 from tools.serve_unity import (
     CAPACITY,
     DISPLAY_BODIES,
+    EXTINCTION_EVENT,
     INITIAL_BODIES,
     LIVE_INITIAL_RESERVE_Q,
     LIVE_RICH_FOOD_CELL_Q,
@@ -41,6 +43,8 @@ from tools.serve_unity import (
     _record,
     _runtime_record,
     _seed_visible_baseline,
+    _stream_reference,
+    _stream_runtime,
     _StreamCursor,
 )
 
@@ -173,6 +177,74 @@ def test_coalesced_render_record_retains_interval_lifecycle_summary() -> None:
     assert record["payload"]["events"] == ["first event", "second event"]
     assert record["payload"]["births"] == 3
     assert record["payload"]["deaths"] == 2
+
+
+class _CaptureConnection:
+    def __init__(self) -> None:
+        self.messages: list[bytes] = []
+
+    def sendall(self, message: bytes) -> None:
+        self.messages.append(message)
+
+
+def test_reference_stream_emits_one_final_extinction_record_before_return() -> None:
+    world = _build_fixture_world(
+        bodies=1,
+        live_bodies=1,
+        device=torch.device("cpu"),
+        economy_interval_s=0.1,
+    )
+    runner = HeadlessRunner(
+        world,
+        maintenance_config=MaintenanceConfig(0.0),
+        age_mortality_config=AgeMortalityConfig(0.05, 0.05),
+    )
+    connection = _CaptureConnection()
+
+    terminal_reason = _stream_reference(
+        connection,
+        world,
+        runner,
+        _StreamCursor(),
+        stream_every_steps=10,
+    )
+    records = [json.loads(message) for message in connection.messages]
+
+    assert terminal_reason == "extinction"
+    assert len(records) == 2
+    assert records[-1]["payload"]["population"] == 0
+    assert records[-1]["payload"]["terminal"] == {"reason": "extinction"}
+    assert records[-1]["payload"]["events"].count(EXTINCTION_EVENT) == 1
+
+
+def test_runtime_stream_emits_one_final_extinction_record_before_return() -> None:
+    world = _build_server_world(device=torch.device("cpu"))
+    _seed_visible_baseline(world)
+    profile = replace(
+        EVOLUTION_DEMO_RUNTIME_PROFILE,
+        mortality=MortalityConfig(0.05, 0.05, seed=7),
+    )
+    backend = RuntimeUnityBackend.from_reference_fixture(
+        world,
+        compile_domains=False,
+        profile=profile,
+    )
+    connection = _CaptureConnection()
+
+    terminal_reason = _stream_runtime(
+        connection,
+        backend,
+        _StreamCursor(),
+        stream_every_steps=10,
+    )
+    records = [json.loads(message) for message in connection.messages]
+
+    assert terminal_reason == "extinction"
+    assert len(records) == 2
+    assert records[-1]["payload"]["population"] == 0
+    assert records[-1]["payload"]["deaths"] == INITIAL_BODIES
+    assert records[-1]["payload"]["terminal"] == {"reason": "extinction"}
+    assert records[-1]["payload"]["events"].count(EXTINCTION_EVENT) == 1
 
 
 def test_live_stream_identity_survives_reconnect_and_simulation_restart() -> None:

@@ -46,6 +46,7 @@ DISPLAY_BODIES = CAPACITY
 ECONOMY_INTERVAL_S = 0.1
 STREAM_EVERY_STEPS = 1
 HEARTBEAT_INTERVAL_S = 5.0
+EXTINCTION_EVENT = "extinction: population reached zero"
 SESSION_ID = "original-baseline-live"
 MODULE_DISPLAY_SCALE = 1.0 / 35.0
 VIEW_WIDTH_M = 60.0
@@ -154,9 +155,9 @@ def _module_sets(world) -> dict[int, list[dict[str, float]]]:
     return result
 
 
-def _seed_visible_baseline(world) -> None:
+def _seed_visible_baseline(world, *, seed: int = 20260809) -> None:
     """Deterministically separate the initial clones in the periodic world."""
-    generator = torch.Generator(device="cpu").manual_seed(20260809)
+    generator = torch.Generator(device="cpu").manual_seed(seed)
     dtype = world.live_state.position_enu_m.dtype
     samples = torch.rand(
         (world.body.capacity, 3), dtype=dtype, generator=generator
@@ -378,6 +379,7 @@ def _record(
     interval_events: list[str] | None = None,
     interval_births: int | None = None,
     interval_deaths: int | None = None,
+    terminal_reason: str | None = None,
 ) -> dict[str, object]:
     step = int(world.economy_state.step.item())
     payload = _payload(world, tick)
@@ -387,6 +389,8 @@ def _record(
         payload["births"] = interval_births
     if interval_deaths is not None:
         payload["deaths"] = interval_deaths
+    if terminal_reason is not None:
+        payload["terminal"] = {"reason": terminal_reason}
     return {
         "kind": "record",
         "session_id": SESSION_ID,
@@ -414,7 +418,26 @@ def _runtime_record(
     interval_light_input_j: float | None = None,
     observation: RuntimeObservationTotals | None = None,
     visual_lineages: RuntimeVisualLineages | None = None,
+    terminal_reason: str | None = None,
 ) -> dict[str, object]:
+    payload = runtime_payload(
+        snapshot,
+        config,
+        display_bodies=DISPLAY_BODIES,
+        module_display_scale=MODULE_DISPLAY_SCALE,
+        view_width_m=VIEW_WIDTH_M,
+        view_height_m=VIEW_HEIGHT_M,
+        view_depth_m=VIEW_DEPTH_M,
+        interval_events=interval_events,
+        interval_births=interval_births,
+        interval_deaths=interval_deaths,
+        interval_dissipation_j=interval_dissipation_j,
+        interval_light_input_j=interval_light_input_j,
+        observation=observation,
+        visual_lineages=visual_lineages,
+    )
+    if terminal_reason is not None:
+        payload["terminal"] = {"reason": terminal_reason}
     return {
         "kind": "record",
         "session_id": SESSION_ID,
@@ -427,22 +450,7 @@ def _runtime_record(
             {"kind": "world", "id": "water-column", "label": "Water column"}
         ],
         "links": [],
-        "payload": runtime_payload(
-            snapshot,
-            config,
-            display_bodies=DISPLAY_BODIES,
-            module_display_scale=MODULE_DISPLAY_SCALE,
-            view_width_m=VIEW_WIDTH_M,
-            view_height_m=VIEW_HEIGHT_M,
-            view_depth_m=VIEW_DEPTH_M,
-            interval_events=interval_events,
-            interval_births=interval_births,
-            interval_deaths=interval_deaths,
-            interval_dissipation_j=interval_dissipation_j,
-            interval_light_input_j=interval_light_input_j,
-            observation=observation,
-            visual_lineages=visual_lineages,
-        ),
+        "payload": payload,
         "provenance": {"bridge": "original-gpu-living-runtime"},
     }
 
@@ -454,8 +462,22 @@ def _stream_reference(
     cursor: _StreamCursor,
     *,
     stream_every_steps: int = STREAM_EVERY_STEPS,
-) -> None:
-    connection.sendall(_line(_record(world, cursor.next(), None)))
+) -> str | None:
+    initially_extinct = not bool(world.body.alive.any())
+    initial_events = [EXTINCTION_EVENT] if initially_extinct else None
+    connection.sendall(
+        _line(
+            _record(
+                world,
+                cursor.next(),
+                None,
+                interval_events=initial_events,
+                terminal_reason="extinction" if initially_extinct else None,
+            )
+        )
+    )
+    if initially_extinct:
+        return "extinction"
     stream_started = time.perf_counter()
     stream_sim_started = world.sim_time_s
     frames_sent = 0
@@ -472,7 +494,10 @@ def _stream_reference(
         interval_deaths += sum(
             report.death_cause is not None for report in tick.maintenance
         )
-        if steps_since_frame < stream_every_steps:
+        extinct = not bool(world.body.alive.any())
+        if extinct and EXTINCTION_EVENT not in interval_events:
+            interval_events.append(EXTINCTION_EVENT)
+        if steps_since_frame < stream_every_steps and not extinct:
             continue
         sequence = cursor.next()
         frames_sent += 1
@@ -485,9 +510,12 @@ def _stream_reference(
                     interval_events=interval_events,
                     interval_births=interval_births,
                     interval_deaths=interval_deaths,
+                    terminal_reason="extinction" if extinct else None,
                 )
             )
         )
+        if extinct:
+            return "extinction"
         steps_since_frame = 0
         interval_events.clear()
         interval_births = 0
@@ -510,19 +538,24 @@ def _stream_runtime(
     cursor: _StreamCursor,
     *,
     stream_every_steps: int = STREAM_EVERY_STEPS,
-) -> None:
+) -> str | None:
     snapshot = backend.snapshot()
+    initially_extinct = not bool(snapshot.alive.any())
     connection.sendall(
         _line(
             _runtime_record(
                 snapshot,
                 backend.config,
                 cursor.next(),
+                interval_events=[EXTINCTION_EVENT] if initially_extinct else None,
                 observation=backend.observation,
                 visual_lineages=backend.visual_lineages,
+                terminal_reason="extinction" if initially_extinct else None,
             )
         )
     )
+    if initially_extinct:
+        return "extinction"
     stream_started = time.perf_counter()
     stream_sim_started = snapshot.time_s
     frames_sent = 0
@@ -547,7 +580,11 @@ def _stream_runtime(
         interval_light_input_j += event_snapshot.interval_light_input_j
         for event in events:
             print(event, flush=True)
-        if steps_since_frame < stream_every_steps:
+        extinct = not bool(event_snapshot.alive.any())
+        if extinct and EXTINCTION_EVENT not in interval_events:
+            interval_events.append(EXTINCTION_EVENT)
+            print(EXTINCTION_EVENT, flush=True)
+        if steps_since_frame < stream_every_steps and not extinct:
             continue
         snapshot = backend.snapshot()
         sequence = cursor.next()
@@ -565,9 +602,12 @@ def _stream_runtime(
                     interval_light_input_j=interval_light_input_j,
                     observation=backend.observation,
                     visual_lineages=backend.visual_lineages,
+                    terminal_reason="extinction" if extinct else None,
                 )
             )
         )
+        if extinct:
+            return "extinction"
         steps_since_frame = 0
         interval_events.clear()
         interval_births = 0
@@ -756,6 +796,7 @@ def main() -> None:
             )
             while True:
                 connection, address = server.accept()
+                terminal_reason = None
                 print(
                     f"Unity client connected from {address[0]}:{address[1]}",
                     flush=True,
@@ -780,7 +821,7 @@ def main() -> None:
                         )
                     )
                     if backend is not None:
-                        _stream_runtime(
+                        terminal_reason = _stream_runtime(
                             connection,
                             backend,
                             cursor,
@@ -788,7 +829,7 @@ def main() -> None:
                         )
                     else:
                         assert runner is not None
-                        _stream_reference(
+                        terminal_reason = _stream_reference(
                             connection,
                             world,
                             runner,
@@ -802,8 +843,22 @@ def main() -> None:
                     OSError,
                 ) as error:
                     print(f"Unity client disconnected: {error}", flush=True)
+                    runtime_extinct = backend is not None and not bool(
+                        backend.session.state.population.alive.any()
+                    )
+                    reference_extinct = backend is None and not bool(
+                        world.body.alive.any()
+                    )
+                    if runtime_extinct or reference_extinct:
+                        terminal_reason = "extinction"
                 finally:
                     connection.close()
+                if terminal_reason is not None:
+                    print(
+                        f"simulation terminal: {terminal_reason}; server stopping",
+                        flush=True,
+                    )
+                    break
 
 
 if __name__ == "__main__":
