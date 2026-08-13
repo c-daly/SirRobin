@@ -82,6 +82,32 @@ def _test_policy() -> PeriodicMotionPolicy:
     )
 
 
+def test_full_interval_validates_constant_effort_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GPU execution must not synchronize the same input every substep."""
+    world = _world(("swimmer", "root-only"), interval_s=0.1)
+    effort = torch.ones_like(world.live_state.yaw_rad)
+    calls = 0
+    original = periodic_motion.validate_effort_fraction
+
+    def counted(body, value) -> None:
+        nonlocal calls
+        calls += 1
+        original(body, value)
+
+    monkeypatch.setattr(periodic_motion, "validate_effort_fraction", counted)
+
+    advance_mechanics_interval(
+        world,
+        12,
+        None,
+        effort_fraction=effort,
+    )
+
+    assert calls == 1
+
+
 def test_exact_zero_clones_cover_every_step_and_fast_forward_without_motion() -> None:
     world = _world(("root-only", "root-only"), interval_s=4.0)
     runner = HeadlessRunner(world, periodic_policy=_test_policy())
@@ -281,13 +307,13 @@ def test_projected_dynamic_state_budget_blocks_periodic_authorization(
 def test_mature_swimmer_fast_forward_matches_a_complete_canonical_run() -> None:
     fast = _world(("swimmer",), interval_s=4.0)
     full = _world(("swimmer",), interval_s=4.0)
-    # Cycle-64 body-frame state from the exploratory full-physics convergence probe.
+    # Cycle-32 body-frame state from the current full-physics convergence probe.
     # It seeds a periodic boundary; the expected trajectory still comes from an
     # independent canonical run below, not from these values.
     for world in (fast, full):
-        world.live_state.velocity_rel_water_enu_m_s[..., 0] = 7.04090886156998
-        world.live_state.velocity_rel_water_enu_m_s[..., 1] = -0.2721492596680295
-        world.live_state.yaw_momentum_kg_m2_s.fill_(36.82010625919977)
+        world.live_state.velocity_rel_water_enu_m_s[..., 0] = 4.630979123791662
+        world.live_state.velocity_rel_water_enu_m_s[..., 1] = -0.07420672089097952
+        world.live_state.yaw_momentum_kg_m2_s.fill_(5.526356072999922)
     policy = replace(
         _test_policy(),
         relative_tolerance=1.0e-8,
@@ -369,13 +395,13 @@ def test_rotated_translated_clones_and_remainder_match_canonical_mechanics() -> 
         )
         world.live_state.yaw_rad[0, 1] = torch.pi / 2
         body_velocity = world.live_state.velocity_rel_water_enu_m_s.new_tensor(
-            [7.04090886156998, -0.2721492596680295]
+            [4.630979123791662, -0.07420672089097952]
         )
         world.live_state.velocity_rel_water_enu_m_s[0, 0, :2] = body_velocity
         world.live_state.velocity_rel_water_enu_m_s[0, 1, :2] = body_velocity.new_tensor(
             [-body_velocity[1], body_velocity[0]]
         )
-        world.live_state.yaw_momentum_kg_m2_s.fill_(36.82010625919977)
+        world.live_state.yaw_momentum_kg_m2_s.fill_(5.526356072999922)
     policy = replace(
         _test_policy(),
         relative_tolerance=1.0e-8,

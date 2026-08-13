@@ -87,7 +87,7 @@ def hydrodynamic_contribution(
     tail_gait = rotate(yaw_quaternion(yaw), tail_gait_flu)
     tail_velocity = velocity + tail_gait
     u = (tail_velocity * forward).sum(-1)
-    vt = (tail_velocity * left).sum(-1)
+    vt = (tail_gait * left).sum(-1)
     local_aft = torch.zeros_like(forward)
     local_aft[..., 0] = -1.0
     tail_tangent = rotate(gather_slots(rot1, tail), local_aft)
@@ -123,17 +123,58 @@ def hydrodynamic_contribution(
     thrust_force = (t_react + t_fin)[:, None] * forward
 
     local_velocity = rotate(conjugate(rot1), segment_velocity)
+    local_com_velocity = rotate(
+        conjugate(rot1),
+        velocity[:, None, :].expand_as(segment_velocity),
+    )
     axial = local_velocity[..., 0]
-    local_drag = torch.zeros_like(local_velocity)
-    area_x = _flat(body.drag_area_flu_m2, 2)[..., 0]
-    local_drag[..., 0] = -0.5 * density[:, None] * config.drag_coeff * area_x * axial.abs() * axial
-    drag_each = torch.where(mask[..., None], rotate(rot1, local_drag), 0.0)
+    drag_area = _flat(body.drag_area_flu_m2, 2)
+    local_axial_drag = torch.zeros_like(local_velocity)
+    local_axial_drag[..., 0] = (
+        -0.5
+        * density[:, None]
+        * config.drag_coeff
+        * drag_area[..., 0]
+        * axial.abs()
+        * axial
+    )
+    # Broadside form drag sees only rigid COM translation. Joint gait remains in
+    # the reactive/wake channels, so lateral tail motion is not charged twice.
+    local_sideslip_drag = torch.zeros_like(local_com_velocity)
+    local_sideslip_drag[..., 1:] = (
+        -0.5
+        * density[:, None, None]
+        * config.sideslip_drag_coeff
+        * drag_area[..., 1:]
+        * local_com_velocity[..., 1:].abs()
+        * local_com_velocity[..., 1:]
+    )
+    axial_drag_each = torch.where(
+        mask[..., None], rotate(rot1, local_axial_drag), 0.0
+    )
+    sideslip_drag_each = torch.where(
+        mask[..., None], rotate(rot1, local_sideslip_drag), 0.0
+    )
+    drag_each = axial_drag_each + sideslip_drag_each
     drag_force = drag_each.sum(1)
-    p_drag = torch.clamp_min(-(drag_each * segment_velocity).sum(-1), 0.0).sum(-1)
+    p_drag = (
+        torch.clamp_min(
+            -(axial_drag_each * segment_velocity).sum(-1),
+            0.0,
+        ).sum(-1)
+        + torch.clamp_min(
+            -(sideslip_drag_each * velocity[:, None, :]).sum(-1),
+            0.0,
+        ).sum(-1)
+    )
     total_force = thrust_force + drag_force
     tail_center = gather_slots(rel1, tail)
     tail_torque = torch.linalg.cross(tail_center, thrust_force, dim=-1)[..., 2]
-    drag_torque = torch.linalg.cross(rel1, drag_each, dim=-1)[..., 2].sum(-1)
+    drag_torque = torch.linalg.cross(
+        rel1,
+        axial_drag_each,
+        dim=-1,
+    )[..., 2].sum(-1)
     yaw_coeff = yaw_drag_coefficient(rel1, broadside, mask, density, config.yaw_drag_coeff)
     yaw_drag = -yaw_coeff * omega * omega.abs()
     torque = tail_torque + drag_torque + yaw_drag

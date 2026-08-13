@@ -15,6 +15,7 @@ class LiveLocomotionConfig:
     rho_neutral_gene: float = 4.0
     kg_per_sim_mass: float = 250.0
     drag_coeff: float = 0.1
+    sideslip_drag_coeff: float = 1.0
     yaw_drag_coeff: float = 1.0
     fin_profile_cd: float = 0.02
     fin_span_eff: float = 0.9
@@ -24,6 +25,7 @@ class LiveLocomotionConfig:
     turn_slew_fraction: float = 0.2
     heading_lowpass_alpha: float = 0.35
     min_heading_speed_m_s: float = 0.2
+    heading_rate_target_rad_s: float = 2.0
     kappa_max: float = 1.0e6
     lam_floor_kg: float = 1.0e-9
     eps_spd: float = 1.0e-6
@@ -42,10 +44,27 @@ class LiveLocomotionConfig:
             raise ValueError("KgPerSimMass must equal rho_water/rho_neutral_gene")
         if self.inertia_floor_kg_m2 <= 0 or self.lam_floor_kg <= 0:
             raise ValueError("numerical assertion floors must be positive")
+        if (
+            not math.isfinite(self.sideslip_drag_coeff)
+            or self.sideslip_drag_coeff <= 0.0
+        ):
+            raise ValueError("sideslip drag coefficient must be finite and positive")
         if self.emergency_omega_rad_s <= 1.0:
             raise ValueError("emergency omega must remain outside the authorizing operating envelope")
         if not 0 < self.heading_lowpass_alpha <= 1 or not 0 < self.turn_slew_fraction <= 1:
             raise ValueError("controller fractions must lie in (0,1]")
+        if (
+            not math.isfinite(self.min_heading_speed_m_s)
+            or self.min_heading_speed_m_s <= 0.0
+        ):
+            raise ValueError("heading-control reference speed must be finite and positive")
+        if (
+            not math.isfinite(self.heading_rate_target_rad_s)
+            or not 0.0 < self.heading_rate_target_rad_s < self.emergency_omega_rad_s
+        ):
+            raise ValueError(
+                "heading-rate target must be finite, positive, and below the emergency threshold"
+            )
         if self.frame_version != "enu-world_flu-body_v1":
             raise ValueError("public live coordinates must use the frozen ENU/FLU frame")
 

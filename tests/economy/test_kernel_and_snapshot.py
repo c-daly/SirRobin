@@ -7,7 +7,7 @@ import torch
 from sirrobin.economy.config import EconomyConfig
 from sirrobin.economy.snapshot import load_snapshot, save_snapshot
 from sirrobin.economy.state import EconomyState
-from sirrobin.economy.step import EconomyKernel
+from sirrobin.economy.step import EconomyKernel, advance_economy_unchecked
 
 
 def tiny_config() -> EconomyConfig:
@@ -34,6 +34,45 @@ def test_full_step_closes_exact_books() -> None:
         assert torch.all(ledger.intervention_count == 0)
         assert torch.all(ledger.transport_shortfall_q == 0)
         state.validate(config)
+
+
+def test_functional_device_step_matches_reference_without_mutating_input() -> None:
+    config = tiny_config()
+    state = seeded_state(config)
+    before = state.clone()
+
+    expected_state = state.clone()
+    expected = EconomyKernel(expected_state, config).step()
+    actual = advance_economy_unchecked(state, config)
+
+    for original, unchanged in zip(
+        state.reservoirs, before.reservoirs, strict=True
+    ):
+        assert torch.equal(original, unchanged)
+    for expected_value, actual_value in zip(
+        expected_state.reservoirs, actual.state.reservoirs, strict=True
+    ):
+        assert torch.equal(actual_value, expected_value)
+    assert torch.equal(actual.ledger.total_after_q, expected.total_after_q)
+    assert torch.equal(actual.ledger.books_closed, expected.books_closed)
+
+
+def test_functional_device_step_has_a_host_read_free_full_graph() -> None:
+    config = tiny_config()
+    state = seeded_state(config)
+    compiled = torch.compile(
+        advance_economy_unchecked,
+        backend="eager",
+        fullgraph=True,
+        dynamic=False,
+    )
+
+    expected = advance_economy_unchecked(state, config)
+    actual = compiled(state, config)
+
+    assert torch.equal(actual.state.nd_q, expected.state.nd_q)
+    assert torch.equal(actual.state.bp_q, expected.state.bp_q)
+    assert torch.equal(actual.ledger.books_closed, expected.ledger.books_closed)
 
 
 def test_snapshot_restores_carries_clock_and_continuation(tmp_path) -> None:

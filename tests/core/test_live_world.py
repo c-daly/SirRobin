@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-import pytest
 import torch
 
 from sirrobin.core.controller import update_heading_controller
@@ -90,7 +89,6 @@ def test_snapshot_regenerates_body_and_continues_exactly(tmp_path):
     assert restored_genotype.stable_id.tolist() == genotype.stable_id.tolist()
 
 
-@pytest.mark.xfail(strict=True, reason="F12: frozen donor-shaped controller does not settle")
 def test_ninety_degree_heading_command_homes_and_settles():
     body = develop(_genotypes())
     state = initialize_live_state(body)

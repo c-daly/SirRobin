@@ -13,7 +13,7 @@ from sirrobin.physics.contracts import (
     LiveState,
     LiveStepLedger,
 )
-from sirrobin.physics.live_step import step_live
+from sirrobin.physics.live_step import step_live, validate_effort_fraction
 from sirrobin.physics.yaw import wrap_pi
 
 
@@ -317,7 +317,10 @@ def _full_advance(
     actuator_braking_work = torch.zeros_like(work)
     ledger = None
     for _ in range(steps):
-        ledger = world._step_mechanics(effort_fraction)
+        ledger = world._step_mechanics(
+            effort_fraction,
+            _effort_fraction_validated=True,
+        )
         alive = world.body.alive
         dissipated_power = torch.where(
             alive,
@@ -330,9 +333,9 @@ def _full_advance(
             0.0,
         )
         work += dissipated_power * world.live_config.dt
-        # Split each canonical substep before integration: this deliberately
-        # models no cross-substep actuator regeneration. Negative input becomes
-        # a named braking-heat output rather than a credit to chemical reserve.
+        # Split every canonical substep before integration. There is no
+        # cross-substep actuator regeneration: negative input is named braking
+        # heat, never a credit to chemical reserve.
         positive_actuator_work += actuator_power.clamp_min(0.0) * world.live_config.dt
         actuator_braking_work += (-actuator_power).clamp_min(0.0) * world.live_config.dt
     if ledger is None:
@@ -360,6 +363,7 @@ def advance_mechanics_interval(
     """Cover one mechanics interval, fast-forwarding only a verified clone orbit."""
     if steps < 1:
         raise ValueError("mechanics interval must contain at least one step")
+    validate_effort_fraction(world.body, effort_fraction)
     if policy is None:
         return _full_advance(world, steps, effort_fraction)
     if not _can_share_representative(
@@ -412,6 +416,7 @@ def advance_mechanics_interval(
                 fluid,
                 world.live_config,
                 effort_fraction=representative_effort,
+                _effort_fraction_validated=True,
             )
             representative.position_enu_m.add_(
                 representative.velocity_rel_water_enu_m_s * world.live_config.dt
@@ -497,7 +502,10 @@ def advance_mechanics_interval(
     ).clone()
     full_steps = period_steps + remainder_steps
     for _ in range(full_steps):
-        last_ledger = world._step_mechanics(effort_fraction)
+        last_ledger = world._step_mechanics(
+            effort_fraction,
+            _effort_fraction_validated=True,
+        )
         work += (
             last_ledger.total.dissipated_power_w.reshape_as(work)
             * world.live_config.dt

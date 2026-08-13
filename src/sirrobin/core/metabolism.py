@@ -75,6 +75,7 @@ class MaintenanceReport:
     maintenance_heat_j: float
     death_dissipation_j: float
     starved: bool
+    death_cause: str | None
 
 
 def _quantize_energy_demand(
@@ -140,6 +141,7 @@ def _maintain_creature(
     last_mechanics_substep: LiveStepLedger | None = None,
     positive_actuator_work_j: float = 0.0,
     actuator_braking_work_j: float = 0.0,
+    old_age_due: bool = False,
 ) -> MaintenanceReport:
     """Settle one explicitly selected live creature."""
     if not bool(world.body.alive[world_index, creature_slot]):
@@ -183,13 +185,15 @@ def _maintain_creature(
     debit_q = min(requested_q, reserve_before_q)
     reserve_after_q = reserve_before_q - debit_q
     starved = debit_q < requested_q
+    death_cause = "starvation" if starved else "old_age" if old_age_due else None
+    died = death_cause is not None
     structure_q = int(
         world.creature_material.structure_q[world_index, creature_slot].item()
     )
-    death_return_q = structure_q + reserve_after_q if starved else 0
+    death_return_q = structure_q + reserve_after_q if died else 0
     total_return_q = debit_q + death_return_q
     death_dissipation_j = 0.0
-    if starved:
+    if died:
         velocity = world.live_state.velocity_rel_water_enu_m_s[
             world_index, creature_slot
         ]
@@ -204,7 +208,7 @@ def _maintain_creature(
         if last_mechanics_substep is None:
             if bool((velocity != 0.0).any()) or yaw_momentum != 0.0:
                 raise ValueError(
-                    "starvation with motion requires the last mechanics ledger"
+                    "death with motion requires the last mechanics ledger"
                 )
             kinetic_j = 0.0
         else:
@@ -243,9 +247,9 @@ def _maintain_creature(
     world.creature_material.reserve_q[world_index, creature_slot] = reserve_after_q
     world.creature_material.maintenance_carry_j[
         world_index, creature_slot
-    ] = 0.0 if starved else carry_after_j
+    ] = 0.0 if died else carry_after_j
 
-    if starved:
+    if died:
         world.creature_material.structure_q[world_index, creature_slot] = 0
         world.creature_material.reserve_q[world_index, creature_slot] = 0
         world.creature_material.intake_carry_mol[world_index, creature_slot] = 0.0
@@ -274,16 +278,17 @@ def _maintain_creature(
         muscle_inefficiency_heat_j=muscle_inefficiency_heat_j,
         demand_j=demand_j,
         carry_before_j=carry_before_j,
-        carry_after_j=0.0 if starved else carry_after_j,
+        carry_after_j=0.0 if died else carry_after_j,
         requested_q=requested_q,
         debit_q=debit_q,
         reserve_before_q=reserve_before_q,
-        reserve_after_q=0 if starved else reserve_after_q,
+        reserve_after_q=0 if died else reserve_after_q,
         maintenance_return_q=debit_q,
         death_return_q=death_return_q,
         maintenance_heat_j=debit_q * energy_per_q,
         death_dissipation_j=death_dissipation_j,
         starved=starved,
+        death_cause=death_cause,
     )
 
 
@@ -292,6 +297,7 @@ def maintain_single_creature(
     config: MaintenanceConfig,
     *,
     last_mechanics_substep: LiveStepLedger | None = None,
+    old_age_due: bool = False,
 ) -> MaintenanceReport | None:
     """Pay maintenance for a world containing at most one live creature."""
     live_locations = world.body.alive.nonzero(as_tuple=False)
@@ -306,6 +312,7 @@ def maintain_single_creature(
         world_index=world_index,
         creature_slot=creature_slot,
         last_mechanics_substep=last_mechanics_substep,
+        old_age_due=old_age_due,
     )
 
 
@@ -316,10 +323,11 @@ def maintain_population(
     last_mechanics_substep: LiveStepLedger | None = None,
     positive_actuator_work_j: torch.Tensor | None = None,
     actuator_braking_work_j: torch.Tensor | None = None,
+    old_age_due: torch.Tensor | None = None,
 ) -> tuple[MaintenanceReport, ...]:
     """Settle every creature alive at the start in stable-ID order.
 
-    A starvation death clears its slot immediately, but the start-of-settlement
+    A death clears its slot immediately, but the start-of-settlement
     census prevents either duplicate settlement or processing any later occupant
     of that slot in the same tick.
     """
@@ -333,6 +341,7 @@ def maintain_population(
         actuator_braking_work_j,
         name="actuator braking work",
     )
+    age_due = _validate_old_age_due(world, old_age_due)
     funded_work = funded_positive_actuator_work_j(world, config)
     if bool((positive_work > funded_work).any()):
         raise ValueError("positive actuator work exceeds the funded chemical budget")
@@ -364,9 +373,30 @@ def maintain_population(
             actuator_braking_work_j=float(
                 braking_work[world_index, creature_slot].item()
             ),
+            old_age_due=bool(age_due[world_index, creature_slot]),
         )
         for world_index, creature_slot in locations
     )
+
+
+def _validate_old_age_due(
+    world: HeadlessWorld,
+    value: torch.Tensor | None,
+) -> torch.Tensor:
+    """Validate the age census before any lifecycle state is mutated."""
+    if value is None:
+        return torch.zeros_like(world.body.alive)
+    if not isinstance(value, torch.Tensor):
+        raise TypeError("old-age census must be a tensor")
+    if tuple(value.shape) != tuple(world.body.alive.shape):
+        raise ValueError("old-age census must have the population shape")
+    if value.device != world.body.alive.device:
+        raise ValueError("old-age census must be on the population device")
+    if value.dtype != torch.bool:
+        raise TypeError("old-age census must use bool dtype")
+    if bool(value[~world.body.alive].any()):
+        raise ValueError("old-age census must be false for inactive slots")
+    return value
 
 
 def _validate_population_work(

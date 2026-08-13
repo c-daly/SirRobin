@@ -83,12 +83,12 @@ def test_default_calibration_binds_evidenced_signed_form_outcomes() -> None:
     deep_cap = calibrate_reduced_motion(_body("deep-cap"))
     backward = calibrate_reduced_motion(_body("random-14"))
 
-    assert swimmer.surge_full_m_s == pytest.approx(3.843585532456881, abs=1e-12)
+    assert swimmer.surge_full_m_s == pytest.approx(3.190000725717699, abs=1e-12)
     assert swimmer.yaw_positive_full_rad_s == pytest.approx(
-        0.22815507731265983, abs=1e-12
+        0.25087952851779055, abs=1e-12
     )
     assert swimmer.yaw_negative_full_rad_s == pytest.approx(
-        -0.25670417298922177, abs=1e-12
+        -0.2745129590162654, abs=1e-12
     )
     root_motion = (
         root_only.surge_half_m_s,
@@ -102,7 +102,9 @@ def test_default_calibration_binds_evidenced_signed_form_outcomes() -> None:
     assert root_only.straight_power_full_w == 0.0
     assert root_only.yaw_inertia_floor_used
     assert root_only.calibration_intervention_count > 0
-    assert deep_cap.yaw_positive_full_rad_s > 0.0
+    # This morphology's calibrated control response is inverted; the reduced
+    # model must preserve adverse form outcomes rather than correcting them.
+    assert deep_cap.yaw_positive_full_rad_s < 0.0
     assert deep_cap.yaw_negative_full_rad_s > 0.0
     assert backward.surge_full_m_s < 0.0
     assert backward.straight_power_full_w > 0.0

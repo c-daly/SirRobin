@@ -139,6 +139,7 @@ def _build_fixture_world(
     live_bodies: int | None = None,
     reserve_q_per_creature: int = FIXTURE_RESERVE_Q_PER_BODY,
     economy_config: EconomyConfig | None = None,
+    physics_dtype: torch.dtype = torch.float64,
 ) -> HeadlessWorld:
     if live_bodies is None:
         live_bodies = bodies
@@ -148,7 +149,7 @@ def _build_fixture_world(
     swimmer = next(row for row in rows if row["id"] == "swimmer")
     genotype = GenotypeBatch.from_donor_rows(
         [swimmer] * bodies,
-        dtype=torch.float64,
+        dtype=physics_dtype,
         device=device,
     )
     genotype.alive[:, live_bodies:] = False
@@ -184,8 +185,8 @@ def _build_fixture_world(
     return HeadlessWorld(
         genotype=genotype,
         fluid=FluidSample(
-            torch.full(lead, 1000.0, dtype=torch.float64, device=device),
-            torch.zeros((*lead, 3), dtype=torch.float64, device=device),
+            torch.full(lead, 1000.0, dtype=physics_dtype, device=device),
+            torch.zeros((*lead, 3), dtype=physics_dtype, device=device),
         ),
         live_config=LiveLocomotionConfig(),
         economy_state=economy_state,

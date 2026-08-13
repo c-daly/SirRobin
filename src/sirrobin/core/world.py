@@ -35,6 +35,7 @@ from dataclasses import replace
 
 import torch
 
+from sirrobin.core.lineage import LineageRecord, ParametricMutation
 from sirrobin.core.live_world import advance_live_world, initialize_live_state
 from sirrobin.core.material import (
     CreatureMaterialState,
@@ -87,6 +88,23 @@ class HeadlessWorld:
         if bool((maximum_ids >= torch.iinfo(torch.int64).max).any()):
             raise ValueError("stable ID allocator is exhausted")
         self._next_stable_id = maximum_ids + 1
+        self._lineage_by_identity: dict[tuple[int, int], LineageRecord] = {}
+        origin_time_s = float(economy_state.time_s)
+        for world_index, creature_slot in genotype.alive.nonzero(
+            as_tuple=False
+        ).tolist():
+            creature_id = int(genotype.stable_id[world_index, creature_slot])
+            key = (world_index, creature_id)
+            if key in self._lineage_by_identity:
+                raise ValueError("live stable IDs must be unique within each world")
+            self._lineage_by_identity[key] = LineageRecord(
+                world_index=world_index,
+                creature_id=creature_id,
+                parent_id=None,
+                generation=0,
+                born_at_s=origin_time_s,
+                mutation=None,
+            )
         body = develop(genotype)
         self.body = replace(
             body, **{name: getattr(body, name).clone() for name in _ALIASED_BODY_FIELDS}
@@ -153,6 +171,51 @@ class HeadlessWorld:
         """Read-only copy of the per-world monotonic ID allocator state."""
         return self._next_stable_id.clone()
 
+    @property
+    def lineage_records(self) -> tuple[LineageRecord, ...]:
+        """Immutable history ordered by world and stable identity."""
+        return tuple(
+            self._lineage_by_identity[key]
+            for key in sorted(self._lineage_by_identity)
+        )
+
+    def lineage_record(self, world_index: int, creature_id: int) -> LineageRecord:
+        """Return one immutable lineage record by authoritative stable identity."""
+        try:
+            return self._lineage_by_identity[(world_index, creature_id)]
+        except KeyError as error:
+            raise KeyError(
+                f"no lineage record for world {world_index}, creature {creature_id}"
+            ) from error
+
+    def _prepare_birth_lineage(
+        self,
+        *,
+        world_index: int,
+        parent_id: int,
+        child_id: int,
+        mutation: ParametricMutation | None,
+    ) -> LineageRecord:
+        """Preflight an immutable child record before a birth mutates authority."""
+        parent = self.lineage_record(world_index, parent_id)
+        if (world_index, child_id) in self._lineage_by_identity:
+            raise ValueError("child stable ID already has a lineage record")
+        return LineageRecord(
+            world_index=world_index,
+            creature_id=child_id,
+            parent_id=parent_id,
+            generation=parent.generation + 1,
+            born_at_s=self.sim_time_s,
+            mutation=mutation,
+        )
+
+    def _commit_lineage(self, record: LineageRecord) -> None:
+        """Commit a record that passed `_prepare_birth_lineage`."""
+        key = (record.world_index, record.creature_id)
+        if key in self._lineage_by_identity:
+            raise RuntimeError("prepared child lineage identity was consumed")
+        self._lineage_by_identity[key] = record
+
     def _allocate_stable_id(self, world_index: int) -> int:
         """Consume one ID after a lifecycle transaction has passed all preflight."""
         value = int(self._next_stable_id[world_index].item())
@@ -199,7 +262,10 @@ class HeadlessWorld:
         )
 
     def _step_mechanics(
-        self, effort_fraction: torch.Tensor | None = None
+        self,
+        effort_fraction: torch.Tensor | None = None,
+        *,
+        _effort_fraction_validated: bool = False,
     ) -> LiveStepLedger:
         """Advance live mechanics by one frozen locomotion dt. Driven by the runner."""
         return advance_live_world(
@@ -209,6 +275,7 @@ class HeadlessWorld:
             self.live_config,
             self.geometry,
             effort_fraction=effort_fraction,
+            _effort_fraction_validated=_effort_fraction_validated,
         )
 
     def _step_economy(self) -> EconomyStepLedger:

@@ -30,11 +30,12 @@ def _authoritative_snapshot(world):
         tuple(carry.clone() for carry in world.creature_material.carries),
         tuple(getattr(world.live_state, field.name).clone() for field in fields(world.live_state)),
         world.next_stable_id.clone(),
+        world.lineage_records,
     )
 
 
 def _assert_authoritative_snapshot(world, expected) -> None:
-    genotype, structure, reserve, carries, live_state, next_id = expected
+    genotype, structure, reserve, carries, live_state, next_id, lineage = expected
     assert all(
         torch.equal(getattr(world.genotype, field.name), value)
         for field, value in zip(fields(world.genotype), genotype, strict=True)
@@ -50,6 +51,7 @@ def _assert_authoritative_snapshot(world, expected) -> None:
         for field, value in zip(fields(world.live_state), live_state, strict=True)
     )
     assert torch.equal(world.next_stable_id, next_id)
+    assert world.lineage_records == lineage
 
 
 def test_paid_birth_transfers_full_cost_and_rebuilds_an_exact_clone() -> None:
@@ -108,6 +110,10 @@ def test_paid_birth_transfers_full_cost_and_rebuilds_an_exact_clone() -> None:
     assert float(world.live_state.gait_time_s[0, 1]) == 0.0
     assert world.live_state.heading_initialized[0, 1].item() is False
     assert world.next_stable_id.tolist() == [3]
+    child_lineage = world.lineage_record(0, 2)
+    assert child_lineage.parent_id == 1
+    assert child_lineage.generation == 1
+    assert child_lineage.mutation is None
     assert world.close_matter_step(before).books_closed.tolist() == [True]
 
 

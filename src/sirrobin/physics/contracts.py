@@ -172,6 +172,7 @@ class DevelopedBody:
     alive: torch.Tensor
     stable_id: torch.Tensor
     seg_mask: torch.Tensor
+    source_node: torch.Tensor
     parent: torch.Tensor
     depth: torch.Tensor
     local_pos_flu_m: torch.Tensor

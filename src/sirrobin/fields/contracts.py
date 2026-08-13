@@ -11,3 +11,12 @@ import torch
 class FieldSample:
     value_mol_m3: torch.Tensor
     gradient_mol_m4: torch.Tensor
+
+
+@dataclass(frozen=True, slots=True)
+class BoundedFieldSample:
+    """Device sample plus an explicit closed-boundary validity mask."""
+
+    value_mol_m3: torch.Tensor
+    gradient_mol_m4: torch.Tensor
+    vertical_out_of_bounds: torch.Tensor

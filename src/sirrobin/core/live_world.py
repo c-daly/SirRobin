@@ -41,6 +41,7 @@ def advance_live_world(
     *,
     requested_heading_enu: torch.Tensor | None = None,
     effort_fraction: torch.Tensor | None = None,
+    _effort_fraction_validated: bool = False,
 ) -> LiveStepLedger:
     if requested_heading_enu is not None:
         update_heading_controller(body, state, requested_heading_enu, config)
@@ -50,6 +51,7 @@ def advance_live_world(
         fluid,
         config,
         effort_fraction=effort_fraction,
+        _effort_fraction_validated=_effort_fraction_validated,
     )
     transport = state.velocity_rel_water_enu_m_s + fluid.velocity_enu_m_s
     next_xy = state.position_enu_m[..., :2] + transport[..., :2] * config.dt

@@ -34,6 +34,7 @@ from sirrobin.core.metabolism import (
     funded_positive_actuator_work_j,
     maintain_population,
 )
+from sirrobin.core.mortality import AgeMortalityConfig, old_age_due_mask
 from sirrobin.core.periodic_motion import (
     MechanicsAdvance,
     PeriodicErrorEstimate,
@@ -43,7 +44,8 @@ from sirrobin.core.periodic_motion import (
 from sirrobin.core.reproduction import (
     BirthConfig,
     BirthReport,
-    attempt_exact_clone_birth,
+    ParametricMutationConfig,
+    attempt_paid_birth,
 )
 from sirrobin.core.world import HeadlessWorld
 from sirrobin.economy.config import EconomyConfig
@@ -169,7 +171,7 @@ def _advance_funded_mechanics(
         requested_work > 0.0,
         (budget / requested_work).clamp(0.0, 1.0),
         1.0,
-    )
+    ).to(dtype=requested.dtype)
     accepted_effort = requested * funding_fraction
     if not bool(funded.all()):
         candidate = trial(accepted_effort)
@@ -219,12 +221,18 @@ class HeadlessRunner:
         feeding_config: FeedingConfig | None = None,
         maintenance_config: MaintenanceConfig | None = None,
         birth_config: BirthConfig | None = None,
+        mutation_config: ParametricMutationConfig | None = None,
+        age_mortality_config: AgeMortalityConfig | None = None,
     ) -> None:
         if periodic_policy is not None and maintenance_config is not None:
             raise ValueError(
                 "energy settlement requires canonical mechanics; periodic "
                 "fast-forward does not publish actuator work"
             )
+        if mutation_config is not None and birth_config is None:
+            raise ValueError("mutation requires a paid birth configuration")
+        if age_mortality_config is not None and maintenance_config is None:
+            raise ValueError("age mortality requires maintenance death settlement")
         self.world = world
         self.schedule = WorldSchedule.from_configs(world.live_config, world.economy_config)
         self.periodic_policy = periodic_policy
@@ -232,6 +240,8 @@ class HeadlessRunner:
         self.feeding_config = feeding_config
         self.maintenance_config = maintenance_config
         self.birth_config = birth_config
+        self.mutation_config = mutation_config
+        self.age_mortality_config = age_mortality_config
         self._books_failed = False
         self._gait_checkpoint_s = world.live_state.gait_time_s.clone()
 
@@ -341,6 +351,11 @@ class HeadlessRunner:
                     last_mechanics_substep=mechanics.last_ledger,
                     positive_actuator_work_j=mechanics.positive_actuator_work_j,
                     actuator_braking_work_j=mechanics.actuator_braking_work_j,
+                    old_age_due=(
+                        old_age_due_mask(self.world, self.age_mortality_config)
+                        if self.age_mortality_config is not None
+                        else None
+                    ),
                 )
                 if self.maintenance_config is not None
                 else ()
@@ -368,11 +383,12 @@ class HeadlessRunner:
                     if reserve_q < structure_q + self.birth_config.initial_reserve_q:
                         continue
                     births.append(
-                        attempt_exact_clone_birth(
+                        attempt_paid_birth(
                             self.world,
                             self.birth_config,
                             world_index=world_index,
                             parent_slot=parent_slot,
+                            mutation_config=self.mutation_config,
                         )
                     )
             matter_ledger = self.world.close_matter_step(matter_before)

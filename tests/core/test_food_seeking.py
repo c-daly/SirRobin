@@ -13,6 +13,7 @@ from sirrobin.core.feeding import FeedingConfig
 from sirrobin.core.foraging import FoodSeekingConfig, apply_food_seeking_intent
 from sirrobin.core.runner import HeadlessRunner
 from sirrobin.economy.config import EconomyConfig
+from sirrobin.physics.controller import retune_heading_controller_state
 from tools.run_world import _build_fixture_world
 
 
@@ -72,6 +73,47 @@ def test_heading_request_uses_bounded_controller_and_does_not_teleport_yaw() -> 
     assert world.live_state.turn_bias_rad_per_depth.item() < 0.0
     assert torch.all(world.live_state.turn_bias_rad_per_depth.abs() <= authority)
     assert torch.equal(world.live_state.yaw_rad, yaw_before)
+
+
+def test_heading_controller_brakes_existing_yaw_momentum_at_zero_error() -> None:
+    world = _world()
+    world.live_state.yaw_momentum_kg_m2_s.fill_(1.0)
+    yaw_before = world.live_state.yaw_rad.clone()
+    momentum_before = world.live_state.yaw_momentum_kg_m2_s.clone()
+
+    apply_food_seeking_intent(world, FoodSeekingConfig(1.0))
+
+    assert world.live_state.turn_bias_rad_per_depth.item() < 0.0
+    assert torch.equal(world.live_state.yaw_rad, yaw_before)
+    assert torch.equal(
+        world.live_state.yaw_momentum_kg_m2_s,
+        momentum_before,
+    )
+
+
+def test_heading_controller_reduces_curvature_as_flow_speed_rises() -> None:
+    slow = _world()
+    fast = _world()
+    slow.live_state.yaw_rad.fill_(math.pi / 2.0)
+    fast.live_state.yaw_rad.fill_(math.pi / 2.0)
+    fast.live_state.velocity_rel_water_enu_m_s[..., 1] = 10.0
+
+    apply_food_seeking_intent(slow, FoodSeekingConfig(1.0))
+    apply_food_seeking_intent(fast, FoodSeekingConfig(1.0))
+    slow_motion = retune_heading_controller_state(
+        slow.body,
+        slow.live_state,
+        slow.live_config,
+    )
+    fast_motion = retune_heading_controller_state(
+        fast.body,
+        fast.live_state,
+        fast.live_config,
+    )
+
+    assert fast_motion.turn_bias_rad_per_depth.abs().item() < (
+        slow_motion.turn_bias_rad_per_depth.abs().item()
+    )
 
 
 def test_flat_food_field_requests_no_heading_or_effort() -> None:

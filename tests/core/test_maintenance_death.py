@@ -68,6 +68,7 @@ def test_maintenance_debits_reserve_returns_matter_and_carries_fractional_demand
     assert report.maintenance_return_q == expected_debit
     assert report.death_return_q == 0
     assert report.starved is False
+    assert report.death_cause is None
     assert report.maintenance_heat_j == (
         expected_debit * world.material_energy_config.reserve_j_per_q
     )
@@ -159,6 +160,7 @@ def test_starvation_returns_all_material_and_cannot_return_it_twice() -> None:
     assert report.death_return_q == 1_000
     assert report.death_dissipation_j == 0.225
     assert report.starved is True
+    assert report.death_cause == "starvation"
     assert world.creature_material.structure_q.tolist() == [[0]]
     assert world.creature_material.reserve_q.tolist() == [[0]]
     assert world.creature_material.intake_carry_mol.tolist() == [[0.0]]
