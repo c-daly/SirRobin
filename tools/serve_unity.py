@@ -60,8 +60,20 @@ LIVE_AGE_MORTALITY_CONFIG = AgeMortalityConfig(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _PendingTerminalRecord:
+    """Immutable terminal observation retained until transport accepts it."""
+
+    reason: str
+    record: bytes
+
+
 class _TerminalDeliveryPending(RuntimeError):
-    """The terminal state is authoritative but no client accepted its record."""
+    """Signal that a terminal record must remain pending across connections."""
+
+    def __init__(self, reason: str, record: bytes) -> None:
+        super().__init__(f"{reason} record delivery remains pending")
+        self.pending = _PendingTerminalRecord(reason, record)
 
 
 @dataclass(slots=True)
@@ -98,10 +110,22 @@ def _send_record(
         connection.sendall(message)
     except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError) as error:
         if terminal_reason is not None:
-            raise _TerminalDeliveryPending(
-                f"{terminal_reason} record delivery remains pending"
-            ) from error
+            raise _TerminalDeliveryPending(terminal_reason, message) from error
         raise
+
+
+def _retry_terminal_record(
+    connection,
+    pending: _PendingTerminalRecord,
+) -> str:
+    """Replay the exact terminal observation; never reconstruct interval facts."""
+
+    _send_record(
+        connection,
+        pending.record,
+        terminal_reason=pending.reason,
+    )
+    return pending.reason
 
 
 def _descriptor(
@@ -812,6 +836,7 @@ def main() -> None:
             runtime_label = "preserved reference runner on cpu"
             startup_label = "reference kernel compilation remains lazy"
         cursor = _StreamCursor()
+        pending_terminal: _PendingTerminalRecord | None = None
         with socket.create_server((HOST, PORT), reuse_port=False) as server:
             print(
                 f"SirRobin Unity server listening on {HOST}:{PORT} "
@@ -848,7 +873,13 @@ def main() -> None:
                             )
                         )
                     )
-                    if backend is not None:
+                    if pending_terminal is not None:
+                        terminal_reason = _retry_terminal_record(
+                            connection,
+                            pending_terminal,
+                        )
+                        pending_terminal = None
+                    elif backend is not None:
                         terminal_reason = _stream_runtime(
                             connection,
                             backend,
@@ -865,6 +896,7 @@ def main() -> None:
                             stream_every_steps=args.stream_every_steps,
                         )
                 except _TerminalDeliveryPending as error:
+                    pending_terminal = error.pending
                     print(
                         f"Unity client disconnected: {error}; "
                         "awaiting reconnect without advancing simulation",

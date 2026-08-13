@@ -41,6 +41,7 @@ from tools.serve_unity import (
     _events,
     _payload,
     _record,
+    _retry_terminal_record,
     _runtime_record,
     _seed_visible_baseline,
     _stream_reference,
@@ -269,7 +270,7 @@ def test_runtime_stream_retries_final_extinction_record_after_reconnect() -> Non
     )
     cursor = _StreamCursor()
 
-    with pytest.raises(_TerminalDeliveryPending, match="extinction"):
+    with pytest.raises(_TerminalDeliveryPending, match="extinction") as caught:
         _stream_runtime(
             _DisconnectBeforeFinalConnection(),
             backend,
@@ -278,21 +279,23 @@ def test_runtime_stream_retries_final_extinction_record_after_reconnect() -> Non
         )
 
     assert not bool(backend.snapshot().alive.any())
-    reconnect = _CaptureConnection()
-    terminal_reason = _stream_runtime(
-        reconnect,
-        backend,
-        cursor,
-        stream_every_steps=10,
+    pending_record = json.loads(caught.value.pending.record)
+    assert pending_record["payload"]["deaths"] == INITIAL_BODIES
+    assert pending_record["payload"]["events"][-1] == EXTINCTION_EVENT
+    assert len(pending_record["payload"]["events"]) == INITIAL_BODIES + 1
+    assert all(
+        event.endswith("died: old age")
+        for event in pending_record["payload"]["events"][:-1]
     )
+    assert pending_record["payload"]["energy"]["dissipation_j"] > 0.0
+    reconnect = _CaptureConnection()
+    terminal_reason = _retry_terminal_record(reconnect, caught.value.pending)
     records = [json.loads(message) for message in reconnect.messages]
 
     assert terminal_reason == "extinction"
     assert len(records) == 1
-    assert records[0]["sequence"] == 3
-    assert records[0]["payload"]["population"] == 0
-    assert records[0]["payload"]["terminal"] == {"reason": "extinction"}
-    assert records[0]["payload"]["events"].count(EXTINCTION_EVENT) == 1
+    assert reconnect.messages[0] == caught.value.pending.record
+    assert records[0] == pending_record
 
 
 def test_live_stream_identity_survives_reconnect_and_simulation_restart() -> None:
