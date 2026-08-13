@@ -104,6 +104,12 @@ def _sample(backend: RuntimeUnityBackend) -> dict[str, object]:
             "parameter_events": observed["parameter_mutation_events"],
             "topology_events": observed["topology_mutation_events"],
         },
+        "behavior": {
+            "seeking_intervals": observed["behavior_seeking_intervals"],
+            "searching_intervals": observed["behavior_searching_intervals"],
+            "cruising_intervals": observed["behavior_cruising_intervals"],
+            "idle_intervals": observed["behavior_idle_intervals"],
+        },
         "conservation": {
             "economy_books_closed": (
                 None

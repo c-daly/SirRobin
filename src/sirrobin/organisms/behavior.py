@@ -58,6 +58,11 @@ class BehaviorStep:
     sampled_producer_mol_m3: torch.Tensor
     producer_gradient_mol_m4: torch.Tensor
     horizontal_gradient_present: torch.Tensor
+    food_sufficient: torch.Tensor
+    seeking: torch.Tensor
+    searching: torch.Tensor
+    cruising: torch.Tensor
+    idle: torch.Tensor
     requested_heading_enu: torch.Tensor
     requested_effort_fraction: torch.Tensor
     birth_requested: torch.Tensor
@@ -152,7 +157,7 @@ def request_living_intent(
         & (config.search_effort_fraction > 0.0)
         & schedule_active
     )
-    searching = search_powered & (config.search_leg_duration_s > 0.0)
+    search_heading_active = search_powered & (config.search_leg_duration_s > 0.0)
     forward, _ = forward_left(motion.yaw_rad)
     horizontal_velocity = motion.velocity_rel_water_enu_m_s[..., :2]
     horizontal_speed = torch.linalg.vector_norm(horizontal_velocity, dim=-1)
@@ -171,7 +176,7 @@ def request_living_intent(
             food_sufficient[..., None],
             food_heading,
             torch.where(
-                searching[..., None],
+                search_heading_active[..., None],
                 search_heading,
                 torch.zeros_like(search_heading),
             ),
@@ -195,6 +200,9 @@ def request_living_intent(
     effort = (seeking_effort + cruise_effort + search_effort).to(
         motion.yaw_rad.dtype
     )
+    searching = search_powered
+    cruising = food_sufficient & schedule_active
+    idle = alive & ~seeking & ~searching & ~cruising
     speed = torch.linalg.vector_norm(
         motion.velocity_rel_water_enu_m_s[..., :2],
         dim=-1,
@@ -211,6 +219,11 @@ def request_living_intent(
         torch.where(alive, sample.value_mol_m3, 0.0),
         torch.where(alive[..., None], sample.gradient_mol_m4, 0.0),
         gradient_present,
+        food_sufficient,
+        seeking,
+        searching,
+        cruising,
+        idle,
         heading,
         effort,
         alive,

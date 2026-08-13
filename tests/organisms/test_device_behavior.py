@@ -72,6 +72,10 @@ def test_device_behavior_requests_gradient_intent_without_assigning_motion() -> 
     )
 
     assert step.horizontal_gradient_present.tolist() == [[True, False]]
+    assert step.seeking.tolist() == [[True, False]]
+    assert not bool(step.searching.any())
+    assert not bool(step.cruising.any())
+    assert not bool(step.idle[0, 0])
     assert step.requested_effort_fraction.tolist() == [[pytest.approx(0.6), 0.0]]
     assert step.birth_requested.tolist() == [[True, False]]
     assert step.invalid.tolist() == [[False, False]]
@@ -195,6 +199,9 @@ def test_flat_field_search_uses_paused_straight_legs() -> None:
     )
 
     assert initial.horizontal_gradient_present.tolist() == [[False, False]]
+    assert initial.searching.tolist() == [[True, True]]
+    assert not bool(initial.seeking.any())
+    assert not bool(initial.cruising.any())
     assert initial.requested_effort_fraction.tolist() == [
         [pytest.approx(0.25), pytest.approx(0.25)]
     ]
@@ -243,6 +250,9 @@ def test_food_rich_gradient_cruises_forward_instead_of_milling() -> None:
     )
 
     assert step.horizontal_gradient_present.tolist() == [[True, False]]
+    assert step.cruising.tolist() == [[True, False]]
+    assert not bool(step.seeking.any())
+    assert not bool(step.searching.any())
     assert step.requested_effort_fraction.tolist() == [
         [pytest.approx(0.1), 0.0]
     ]
