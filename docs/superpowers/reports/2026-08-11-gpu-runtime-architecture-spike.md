@@ -690,14 +690,47 @@ be repaired before startup is described as honest prewarm.
    design that restores useful complete-world throughput before treating the
    morphology tranche as checkpoint-ready.
 
-## Current decision
+## Decision before follow-up
 
 Continue the GPU-resident rearchitecture, including the cohesive module split. The
 Unity server is switched to the device runtime by default, subject to fresh visual
 validation, but the reference runner is not retired. The candidate proves that a
 GPU-friendly complete transaction is possible and useful; it does not yet prove
-deep-time throughput or selection fidelity. The next scientific performance
-decision is now twofold: avoid dense morphology candidate work when births are rare,
-and establish a justified cadence/response model for remaining hot-loop cost. The
-morphology-enabled checkout must not be checkpointed as performance-acceptable at
-its current 0.793 simulated s/s 5,000-slot result.
+deep-time throughput or selection fidelity.
+
+## Bounded birth-work and behavior follow-up (2026-08-13)
+
+Two speculative performance implementations were measured and rejected. A smaller
+structural-development graph still ran on every interval and measured only 0.448
+simulated s/s at 5,000 slots. A correction first appeared faster when it assumed
+the current founder geometry was sufficient to bound future offspring prices, but
+that assumption is not valid for the accepted scaled and recursive genotype domain.
+The generalized conservative bound measured 1.235 simulated s/s against a 1.670
+same-code exact-development control, 26.1% slower. Neither implementation remains
+in the runtime. These negative results narrow the next attempt to a genuinely packed
+candidate batch or a justified reproduction cadence; another dense all-slot probe
+is not warranted.
+
+Behavior was instrumented without changing the policy. Every live interval is now
+accounted as seeking, searching, cruising, or idle, and
+`tools/diagnose_foraging.py` relates those requests to per-identity effort, intake,
+path length, displacement, and yaw. A 30-second compiled-CUDA observation with seed
+20260809 covered 2,775 identity-intervals across 13 identities: 623 seeking, 1,083
+searching, 321 cruising, and 748 idle, with exact books closed.
+
+That diagnostic reproduces the owner-visible milling mechanism. Founder 1 switched
+between 172 seeking and 93 cruising intervals, accumulated 7.09 rad absolute yaw,
+and traveled 3.30 times its displacement. Founder 4 switched between 160 seeking
+and 83 cruising intervals, accumulated 8.35 rad absolute yaw, and traveled 2.45
+times its displacement. Several flat-field searchers instead produced path ratios
+near 1.03-1.07. The evidence therefore continues to locate the tight food-patch
+paths in the abrupt seek/cruise policy boundary, not in Unity interpolation alone.
+
+## Current decision
+
+The next scientific performance decision is a genuinely packed candidate batch or
+a justified cadence/response model for remaining hot-loop cost. The next behavior
+decision is a separate evidence-driven policy tranche: remove nonlocal world-peak
+knowledge and compare a local reserve/intake-driven policy against this frozen
+characterization. Neither workstream may tune survival, population, or visual path
+shape as a hidden success condition.

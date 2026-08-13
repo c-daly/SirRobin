@@ -64,6 +64,10 @@ class LivingChunkSummary:
     mutation_events: torch.Tensor
     parameter_mutation_events: torch.Tensor
     topology_mutation_events: torch.Tensor
+    behavior_seeking_intervals: torch.Tensor
+    behavior_searching_intervals: torch.Tensor
+    behavior_cruising_intervals: torch.Tensor
+    behavior_idle_intervals: torch.Tensor
     feeding_requested_q: torch.Tensor
     feeding_actual_debit_q: torch.Tensor
     feeding_reserve_credit_q: torch.Tensor
@@ -311,6 +315,10 @@ class RuntimeSession:
             mutation_events = zeros_i64.clone()
             parameter_mutation_events = zeros_i64.clone()
             topology_mutation_events = zeros_i64.clone()
+            behavior_seeking_intervals = zeros_i64.clone()
+            behavior_searching_intervals = zeros_i64.clone()
+            behavior_cruising_intervals = zeros_i64.clone()
+            behavior_idle_intervals = zeros_i64.clone()
             feeding_requested_q = zeros_i64.clone()
             feeding_actual_debit_q = zeros_i64.clone()
             feeding_reserve_credit_q = zeros_i64.clone()
@@ -332,6 +340,22 @@ class RuntimeSession:
                 invalid |= advance.ledger.invalid
                 if behavior is not None:
                     invalid |= behavior.invalid.any(dim=1)
+                    behavior_seeking_intervals += behavior.seeking.sum(
+                        dim=1,
+                        dtype=torch.int64,
+                    )
+                    behavior_searching_intervals += behavior.searching.sum(
+                        dim=1,
+                        dtype=torch.int64,
+                    )
+                    behavior_cruising_intervals += behavior.cruising.sum(
+                        dim=1,
+                        dtype=torch.int64,
+                    )
+                    behavior_idle_intervals += behavior.idle.sum(
+                        dim=1,
+                        dtype=torch.int64,
+                    )
                 funding_unresolved |= advance.ledger.motion_funding_unresolved
                 feeding_unresolved |= (
                     advance.ledger.feeding_allocation_unresolved
@@ -426,6 +450,10 @@ class RuntimeSession:
                 mutation_events,
                 parameter_mutation_events,
                 topology_mutation_events,
+                behavior_seeking_intervals,
+                behavior_searching_intervals,
+                behavior_cruising_intervals,
+                behavior_idle_intervals,
                 feeding_requested_q,
                 feeding_actual_debit_q,
                 feeding_reserve_credit_q,

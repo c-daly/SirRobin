@@ -98,6 +98,10 @@ class RuntimeObservationTotals:
     mutation_events: int = 0
     parameter_mutation_events: int = 0
     topology_mutation_events: int = 0
+    behavior_seeking_intervals: int = 0
+    behavior_searching_intervals: int = 0
+    behavior_cruising_intervals: int = 0
+    behavior_idle_intervals: int = 0
     feeding_requested_q: int = 0
     feeding_actual_debit_q: int = 0
     feeding_reserve_credit_q: int = 0
@@ -117,6 +121,10 @@ class RuntimeObservationTotals:
             "mutation_events",
             "parameter_mutation_events",
             "topology_mutation_events",
+            "behavior_seeking_intervals",
+            "behavior_searching_intervals",
+            "behavior_cruising_intervals",
+            "behavior_idle_intervals",
             "feeding_requested_q",
             "feeding_actual_debit_q",
             "feeding_reserve_credit_q",

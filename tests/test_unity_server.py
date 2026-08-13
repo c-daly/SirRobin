@@ -678,6 +678,16 @@ def test_runtime_diagnostics_report_exact_reproduction_funding_outcomes() -> Non
         totals["parameter_mutation_events"]
         + totals["topology_mutation_events"]
     )
+    behavior_intervals = sum(
+        totals[name]
+        for name in (
+            "behavior_seeking_intervals",
+            "behavior_searching_intervals",
+            "behavior_cruising_intervals",
+            "behavior_idle_intervals",
+        )
+    )
+    assert behavior_intervals == INITIAL_BODIES
     assert totals["feeding_requested_q"] >= totals["feeding_actual_debit_q"]
     assert payload["diagnostics"]["current"]["population"] == INITIAL_BODIES
     assert payload["diagnostics"]["current"]["generation"]["counts"] == [
