@@ -1,0 +1,33 @@
+{
+  "schema": "sirrobin.development-live.corpus.v1",
+  "source_fixture": "donor_development_live.json",
+  "classes": {
+    "H1": {
+      "description": "realistic heterogeneous donor-tree morphology, repeated in literal id order",
+      "cycle_ids": [
+        "swimmer", "mirrored", "deep-cap", "random-00", "random-01", "random-02",
+        "random-03", "random-04", "random-05", "random-06", "random-07", "random-08",
+        "random-09", "random-10", "random-11", "random-12", "random-13", "random-14",
+        "random-15", "random-16", "random-17", "random-18", "random-19", "random-20",
+        "random-21", "random-22", "random-23", "random-24", "random-25", "random-26"
+      ]
+    },
+    "H2": {
+      "description": "skewed mask/anisotropy stress: low occupancy dominates with explicit 16-slot outliers",
+      "cycle_ids": [
+        "random-04", "random-06", "random-15", "random-22", "random-24", "random-26",
+        "random-07", "random-04", "random-06", "random-15", "random-22", "random-24",
+        "random-26", "random-09", "random-04", "random-06", "random-15",
+        "wide-16", "wide-16", "wide-16"
+      ]
+    }
+  },
+  "authorization": {
+    "population_cells": [
+      { "live": 5000, "capacity": 5120, "floor_creature_steps_s": 600000 },
+      { "live": 10000, "capacity": 10240, "floor_creature_steps_s": 1200000 }
+    ],
+    "required_classes": ["H1", "H2"],
+    "h0_may_authorize": false
+  }
+}

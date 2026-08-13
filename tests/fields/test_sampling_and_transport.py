@@ -10,6 +10,7 @@ from sirrobin.economy.state import EconomyState
 from sirrobin.fields.geometry import GridGeometry
 from sirrobin.fields.grid import ScalarGrid
 from sirrobin.fields.transport import mix_vertical, sink_vertical
+from sirrobin.numerics.flux import INT64_SAFE_MAX
 
 
 def config_2x2x2(**changes: object) -> EconomyConfig:
@@ -50,6 +51,84 @@ def test_point_depletion_is_an_exact_transaction() -> None:
     assert realized == 123
     assert int(state.nd_q.sum()) == before - realized
     assert torch.all(state.nd_q >= 0)
+
+
+@pytest.mark.parametrize(
+    "position",
+    (
+        (0.5, 0.5, -0.5),
+        (0.5, 0.5, 0.0),
+        (2.5, 0.5, -0.5),
+    ),
+)
+def test_point_depletion_never_takes_zero_weight_stock(
+    position: tuple[float, float, float],
+) -> None:
+    config = config_2x2x2()
+    state = EconomyState.zeros(config)
+    state.nd_q.fill_(1_000)
+    state.nd_q[0, 0, 0, 0] = 1
+    grid = ScalarGrid(state.nd_q, GridGeometry.from_config(config), q_mass_mol=config.q_mass_mol)
+
+    realized = grid.deplete_at(0, torch.tensor(position), 100)
+
+    assert realized == 1
+    assert state.nd_q[0, 0, 0, 0].item() == 0
+    assert int(state.nd_q.sum().item()) == 7_000
+
+
+def test_point_deposit_is_an_exact_local_credit() -> None:
+    config = config_2x2x2()
+    state = EconomyState.zeros(config)
+    grid = ScalarGrid(state.nd_q, GridGeometry.from_config(config), q_mass_mol=config.q_mass_mol)
+
+    credited = grid.deposit_at(0, torch.tensor([1.0, 1.0, -1.0]), 123)
+
+    assert credited == 123
+    assert int(state.nd_q.sum()) == credited
+    assert state.nd_q.count_nonzero() <= 8
+
+
+def test_point_deposit_rejects_float_apportionment_mint_before_mutation() -> None:
+    config = config_2x2x2()
+    state = EconomyState.zeros(config)
+    grid = ScalarGrid(state.nd_q, GridGeometry.from_config(config), q_mass_mol=config.q_mass_mol)
+
+    with pytest.raises(ValueError, match="exactly apportion"):
+        grid.deposit_at(
+            0,
+            torch.tensor([1.0, 0.5, -0.5]),
+            INT64_SAFE_MAX - 2,
+        )
+
+    assert int(state.nd_q.sum().item()) == 0
+
+
+def test_point_depletion_rejects_float_apportionment_overdebit_before_mutation() -> None:
+    config = replace(
+        EconomyConfig(),
+        gx=1,
+        gy=1,
+        gz=2,
+        lx_m=1.0,
+        ly_m=1.0,
+        lz_m=2.0,
+        max_inventory_q=INT64_SAFE_MAX - 1,
+    )
+    state = EconomyState.zeros(config)
+    stock_q = 2**61 - 1
+    state.nd_q[0, 0, 0] = torch.tensor([stock_q, stock_q], dtype=torch.int64)
+    grid = ScalarGrid(state.nd_q, GridGeometry.from_config(config), q_mass_mol=config.q_mass_mol)
+    before = state.nd_q.clone()
+
+    with pytest.raises(ValueError, match="exactly apportioned"):
+        grid.deplete_at(
+            0,
+            torch.tensor([0.5, 0.5, -1.0]),
+            INT64_SAFE_MAX - 3,
+        )
+
+    assert torch.equal(state.nd_q, before)
 
 
 def test_mixing_recolonizes_producers_but_cannot_create_them() -> None:

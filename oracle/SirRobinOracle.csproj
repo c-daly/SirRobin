@@ -7,6 +7,10 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>
+    <!-- The nested development oracle introduced a second top-level Program under this
+         project's directory, which the SDK default compile glob sweeps in. Scope the
+         glob to exclude it so both headless oracle projects build independently. -->
+    <Compile Remove="development/**" />
     <Compile Include="/mnt/c/Users/cddal/game prototype/Assets/ProceduralWorld/Scripts/Life/SwimEval.cs"
              Link="Donor/SwimEval.cs" />
   </ItemGroup>

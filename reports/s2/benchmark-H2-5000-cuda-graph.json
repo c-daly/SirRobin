@@ -1,0 +1,43 @@
+{
+  "config_hash": "89a3fe8964f7bd493d4a1ee3514b0ab5e974931942786142e088d49da8a4b6f2",
+  "cuda": {
+    "compute_capability": "12.0",
+    "device_name": "NVIDIA GeForce RTX 5070",
+    "runtime": "13.0",
+    "total_memory_bytes": 12820480000
+  },
+  "fixture_hashes": {
+    "corpus": "4bfb1c5a386c61290bf1d9cbcfa0cbd4f04b6d5294d7e3c42a00a41f51d38463",
+    "donor": "ea1c957beea9de9404e661aedc3d8bc2dc838d992b64716e010b2e0ad1da3bf1"
+  },
+  "platform": "Linux-6.6.114.1-microsoft-standard-WSL2-x86_64-with-glibc2.43",
+  "python": "3.12.13",
+  "result": {
+    "capacity": 5120,
+    "compile_time_s": 0.0,
+    "corpus_class": "H2",
+    "device": "cuda",
+    "inertia_floor_count": 0,
+    "live_bodies": 5000,
+    "median_creature_steps_s": 1980629.6858465902,
+    "minimum_creature_steps_s": 1971100.3054965616,
+    "nonfinite_count": 0,
+    "omega_backstop_count": 0,
+    "peak_memory_bytes": 95562240,
+    "q1_creature_steps_s": 1974741.0153415832,
+    "q3_creature_steps_s": 1984671.8892248236,
+    "regularization_count": 0,
+    "repetitions": [
+      1974741.0153415832,
+      1980629.6858465902,
+      1984671.8892248236,
+      1985375.4333835708,
+      1971100.3054965616
+    ],
+    "rung": "cudagraph",
+    "status": "ok",
+    "steps": 120
+  },
+  "schema": "sirrobin.live.benchmark.v1",
+  "torch_version": "2.13.0+cu130"
+}
