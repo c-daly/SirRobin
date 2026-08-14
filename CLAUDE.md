@@ -1,5 +1,14 @@
 # SirRobin — project disposition
 
+> **Resumed as the active base (2026-08-09).** The project owner has halted the
+> successor SirRobin Living recovery and chosen this original repository as the
+> foundation for continued work. This clean restart branch begins at the
+> reviewed Tranche A commit `3e007af`; the separate dirty
+> `recovery/living-loop` checkout remains preserved. The first milestone is a
+> measured, runnable whole simulation and viewer. See
+> `docs/2026-08-09-project-resumption-decision.md` and the accepted lean plan at
+> `docs/superpowers/plans/2026-08-09-sirrobin-lean-living-loop-restart.md`.
+
 SirRobin is a headless, GPU-vectorized ocean-life evolution simulation. Its scientific aim is a world where
 form causes function, matter and energy have honest paths, and ecological/evolutionary outcomes are discovered
 rather than scripted. The sea robin—fins that can eventually walk—is an emblem and research ambition, not a
@@ -42,6 +51,13 @@ target phenotype the code is allowed to grant.
 
 ## Current direction
 
+The immediate direction is operational recovery of this repository, not
+continuation of the successor repository's tranche sequence. Demonstrate the
+existing headless simulation and viewer at a useful measured rate, then repair
+only concrete blockers to the vertical living loop. Import later safeguards
+only in response to demonstrated defects; do not transplant the successor
+recovery system wholesale.
+
 Work on `recovery/living-loop` starts from `0cea74e`, before the later controller/actuator investigations. Those
 investigations remain preserved on `main`. S2's articulated mechanics, body development, and work accounting are
 reusable; its exact-heading-settlement failure is historical phenotype evidence, not a veto on the living loop.
@@ -58,9 +74,11 @@ detachable Unity observer remains useful.
 
 ## Routing
 
+- `docs/2026-08-09-project-resumption-decision.md` — current owner decision and immediate operational milestone.
+- `docs/superpowers/plans/2026-08-09-sirrobin-lean-living-loop-restart.md` — accepted active execution plan.
 - `docs/2026-07-13-sirrobin-game-prototype-recovery-synthesis.md` — recovery position and evidence.
-- `docs/superpowers/plans/2026-07-13-sirrobin-living-loop-recovery-implementation-plan.md` — active execution
-  authority.
+- `docs/superpowers/plans/2026-07-13-sirrobin-living-loop-recovery-implementation-plan.md` — superseded historical
+  plan; retained for design provenance only.
 - `docs/2026-07-13-sirrobin-test-gate-policy.md` — test classification and proportionality.
 - `docs/2026-07-12-sirrobin-developer-reference.md` — detailed live API and architecture reference.
 - `docs/2026-07-11-sirrobin-design-document.md` and earlier S0/S1/S2 plans/reports — design intent and historical

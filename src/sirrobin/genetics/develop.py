@@ -7,7 +7,7 @@ import math
 import torch
 
 from sirrobin.genetics.genotype import E_MAX, N_MAX, SURFACE, GenotypeBatch
-from sirrobin.numerics.ellipsoid_added_mass import added_mass
+from sirrobin.numerics.ellipsoid_added_mass import added_mass_unchecked
 from sirrobin.numerics.quat import identity, multiply, rotate
 from sirrobin.physics.contracts import DevelopedBody
 
@@ -42,7 +42,15 @@ def _mirror_quat(q: torch.Tensor, side: torch.Tensor) -> torch.Tensor:
 
 
 def develop(genotype: GenotypeBatch) -> DevelopedBody:
+    """Validate external hereditary state, then develop canonical morphology."""
+
     genotype.validate()
+    return develop_unchecked(genotype)
+
+
+def develop_unchecked(genotype: GenotypeBatch) -> DevelopedBody:
+    """Develop a boundary-validated fixed-shape genotype without host reads."""
+
     w, n = genotype.alive.shape
     b = w * n
     dtype = genotype.node_log_axes_flu_m.dtype
@@ -69,6 +77,7 @@ def develop(genotype: GenotypeBatch) -> DevelopedBody:
 
     shape_s = (b, S_SLOT)
     seg_mask = torch.zeros(shape_s, dtype=torch.bool, device=device)
+    source_node_out = torch.zeros(shape_s, dtype=torch.int16, device=device)
     parent_out = torch.zeros(shape_s, dtype=torch.int16, device=device)
     depth_out = torch.zeros(shape_s, dtype=torch.int8, device=device)
     local_pos_out = torch.zeros((*shape_s, 3), dtype=dtype, device=device)
@@ -109,6 +118,7 @@ def develop(genotype: GenotypeBatch) -> DevelopedBody:
         axes = _gather(node_axes, node) * stack_scale[:, 0, None]
         density = _gather(node_density[..., None], node).squeeze(-1)
         seg_mask[:, slot] = node_valid
+        source_node_out[:, slot] = torch.where(node_valid, node, 0).to(torch.int16)
         parent_out[:, slot] = torch.where(node_valid, stack_parent[:, 0], 0)
         depth_out[:, slot] = torch.where(node_valid, stack_depth[:, 0], 0).to(torch.int8)
         local_pos_out[:, slot] = torch.where(node_valid[:, None], stack_local_pos[:, 0], 0.0)
@@ -202,7 +212,7 @@ def develop(genotype: GenotypeBatch) -> DevelopedBody:
         dim=-1,
     )
     safe_axes = torch.where(seg_mask[..., None], axes_out, torch.ones_like(axes_out))
-    madd = added_mass(safe_axes, 1000.0)
+    madd = added_mass_unchecked(safe_axes, 1000.0)
     madd = torch.where(seg_mask[..., None], madd, 0.0)
     fin_perp = torch.where(surface_out, madd[..., 1], 0.0)
     aft_local = torch.zeros_like(rest_pos_out)
@@ -220,6 +230,7 @@ def develop(genotype: GenotypeBatch) -> DevelopedBody:
         alive=genotype.alive,
         stable_id=genotype.stable_id,
         seg_mask=reshape(seg_mask),
+        source_node=reshape(source_node_out),
         parent=reshape(parent_out),
         depth=reshape(depth_out),
         local_pos_flu_m=reshape(local_pos_out, 3),

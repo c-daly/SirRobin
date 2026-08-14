@@ -8,9 +8,11 @@ from sirrobin.core.live_world import initialize_live_state
 from sirrobin.genetics.develop import develop
 from sirrobin.genetics.genotype import GenotypeBatch
 from sirrobin.physics.contracts import FluidSample
+from sirrobin.physics.force_hydrodynamic import hydrodynamic_contribution
 from sirrobin.physics.force_sum import sum_contributions, zero_force
 from sirrobin.physics.live_config import LiveLocomotionConfig
 from sirrobin.physics.live_step import step_live
+from sirrobin.physics.pose_live import resolve_live_pose
 from sirrobin.physics.yaw import advance_yaw
 
 FIXTURE = Path("oracle/fixtures/live/donor_development_live.json")
@@ -104,6 +106,107 @@ def test_live_step_is_finite_tail_aft_and_has_zero_interventions():
     assert torch.allclose(state.velocity_rel_water_enu_m_s[..., 2], torch.zeros_like(state.yaw_rad))
     assert abs(float(ledger.residual_linear_j)) < 1e-10
     assert abs(float(ledger.residual_rot_j)) < 1e-10
+
+
+def test_passive_sideslip_is_not_misclassified_as_tail_gait() -> None:
+    body = _body("swimmer")
+    state = initialize_live_state(body)
+    state.velocity_rel_water_enu_m_s[..., :2] = torch.tensor(
+        [1.0, 1.0], dtype=torch.float64
+    )
+    effort = torch.zeros_like(state.yaw_rad)
+    pose0 = resolve_live_pose(
+        body,
+        state.gait_time_s,
+        state.turn_bias_rad_per_depth,
+        effort=effort,
+    )
+    pose1 = resolve_live_pose(
+        body,
+        state.gait_time_s + LiveLocomotionConfig().dt,
+        state.turn_bias_rad_per_depth,
+        effort=effort,
+    )
+
+    hydro = hydrodynamic_contribution(
+        body,
+        state,
+        pose0,
+        pose1,
+        torch.full((1,), 1000.0, dtype=torch.float64),
+        LiveLocomotionConfig(),
+    )
+
+    assert torch.equal(
+        hydro.diagnostics.reactive_thrust_n,
+        torch.zeros_like(hydro.diagnostics.reactive_thrust_n),
+    )
+    assert torch.equal(
+        hydro.diagnostics.reactive_input_power_w,
+        torch.zeros_like(hydro.diagnostics.reactive_input_power_w),
+    )
+    assert torch.equal(
+        hydro.diagnostics.wake_power_w,
+        torch.zeros_like(hydro.diagnostics.wake_power_w),
+    )
+    assert torch.all(hydro.diagnostics.fin_thrust_n < 0.0)
+    assert torch.equal(
+        hydro.diagnostics.fin_input_power_w,
+        torch.zeros_like(hydro.diagnostics.fin_input_power_w),
+    )
+    assert torch.all(hydro.diagnostics.fin_dissipated_power_w > 0.0)
+
+
+def test_passive_rigid_sideslip_has_broadside_drag_without_tail_thrust() -> None:
+    body = _body("swimmer")
+    state = initialize_live_state(body)
+    state.velocity_rel_water_enu_m_s[..., 1] = 1.0
+    effort = torch.zeros_like(state.yaw_rad)
+    config = LiveLocomotionConfig()
+    pose0 = resolve_live_pose(
+        body,
+        state.gait_time_s,
+        state.turn_bias_rad_per_depth,
+        effort=effort,
+    )
+    pose1 = resolve_live_pose(
+        body,
+        state.gait_time_s + config.dt,
+        state.turn_bias_rad_per_depth,
+        effort=effort,
+    )
+
+    hydro = hydrodynamic_contribution(
+        body,
+        state,
+        pose0,
+        pose1,
+        torch.full((1,), config.rho_water, dtype=torch.float64),
+        config,
+    )
+
+    broadside_area_m2 = body.drag_area_flu_m2[..., 1].sum()
+    expected_force_n = (
+        -0.5
+        * config.rho_water
+        * config.sideslip_drag_coeff
+        * broadside_area_m2
+    )
+    assert torch.equal(
+        hydro.diagnostics.reactive_thrust_n,
+        torch.zeros_like(hydro.diagnostics.reactive_thrust_n),
+    )
+    assert torch.equal(
+        hydro.diagnostics.fin_thrust_n,
+        torch.zeros_like(hydro.diagnostics.fin_thrust_n),
+    )
+    assert hydro.diagnostics.drag_force_enu_n[0, 0] == pytest.approx(0.0)
+    assert hydro.diagnostics.drag_force_enu_n[0, 1] == pytest.approx(
+        float(expected_force_n)
+    )
+    assert hydro.diagnostics.drag_dissipated_power_w.item() == pytest.approx(
+        float(-expected_force_n)
+    )
 
 
 def test_open_loop_turn_commands_have_opposite_symmetric_yaw():

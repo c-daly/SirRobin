@@ -52,7 +52,6 @@ def test_cuda_development_matches_cpu_and_live_step_has_no_interventions():
     assert torch.isfinite(state.velocity_rel_water_enu_m_s).all().item()
 
 
-@pytest.mark.xfail(strict=True, reason="F12: frozen donor-shaped controller does not settle")
 def test_cuda_graph_homing_settles_without_yaw_backstop():
     genotype = GenotypeBatch.from_donor_rows([_rows()[0]], dtype=torch.float32, device="cuda")
     body = develop(genotype)
