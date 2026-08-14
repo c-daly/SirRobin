@@ -24,7 +24,7 @@ class BehaviorConfig:
     search_effort_fraction: float = 0.0
     search_leg_duration_s: float = 0.0
     search_duty_fraction: float = 1.0
-    food_sufficient_peak_fraction: float = 0.0
+    food_sufficient_reserve_ratio: float = 0.0
     food_cruise_effort_fraction: float = 0.0
 
     def validate(self) -> None:
@@ -42,14 +42,20 @@ class BehaviorConfig:
             raise TypeError("search leg duration must be a real number")
         if not math.isfinite(duration) or duration < 0.0:
             raise ValueError("search leg duration must be finite and nonnegative")
-        for label, value in (
-            ("search duty", self.search_duty_fraction),
-            ("food sufficient peak", self.food_sufficient_peak_fraction),
-        ):
+        for label, value in (("search duty", self.search_duty_fraction),):
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise TypeError(f"{label} fraction must be a real number")
             if not math.isfinite(value) or not 0.0 <= value <= 1.0:
                 raise ValueError(f"{label} fraction must be finite and in [0,1]")
+        reserve_ratio = self.food_sufficient_reserve_ratio
+        if isinstance(reserve_ratio, bool) or not isinstance(
+            reserve_ratio, (int, float)
+        ):
+            raise TypeError("food sufficient reserve ratio must be a real number")
+        if not math.isfinite(reserve_ratio) or reserve_ratio < 0.0:
+            raise ValueError(
+                "food sufficient reserve ratio must be finite and nonnegative"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,20 +116,16 @@ def request_living_intent(
     gradient_heading = horizontal / magnitude[..., None].clamp_min(
         torch.finfo(horizontal.dtype).tiny
     )
-    peak_concentration = (
-        producer_q.amax(dim=(1, 2, 3)).to(sample.value_mol_m3.dtype)
-        * q_mass_mol
-        / geometry.cell_volume_m3
-    )[:, None]
+    reserve_target_q = (
+        population.structure_q.to(sample.value_mol_m3.dtype)
+        * config.food_sufficient_reserve_ratio
+    )
     food_sufficient = (
         alive
         & valid_sample
-        & (config.food_sufficient_peak_fraction > 0.0)
-        & (peak_concentration > 0.0)
-        & (
-            sample.value_mol_m3
-            >= config.food_sufficient_peak_fraction * peak_concentration
-        )
+        & (config.food_sufficient_reserve_ratio > 0.0)
+        & (sample.value_mol_m3 > 0.0)
+        & (population.reserve_q.to(reserve_target_q.dtype) >= reserve_target_q)
     )
     seeking = gradient_present & ~food_sufficient
 
@@ -170,7 +172,7 @@ def request_living_intent(
         forward[..., :2],
     )
     heading = torch.where(
-        seeking[..., None],
+        gradient_present[..., None],
         gradient_heading,
         torch.where(
             food_sufficient[..., None],

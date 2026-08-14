@@ -76,7 +76,10 @@ LIVE_BEHAVIOR_CONFIG = BehaviorConfig(
     # sustained straight run after each turn.
     search_leg_duration_s=30.0,
     search_duty_fraction=0.65,
-    food_sufficient_peak_fraction=0.5,
+    # One structural-equivalent reserve is a morphology-scaled internal target.
+    # Local producer must also be present; no world-wide field statistic enters
+    # the behavior decision.
+    food_sufficient_reserve_ratio=1.0,
     food_cruise_effort_fraction=0.1,
 )
 

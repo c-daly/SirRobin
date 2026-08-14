@@ -493,7 +493,7 @@ def test_device_runtime_backend_advances_and_formats_existing_protocol() -> None
     assert backend.config.behavior.search_effort_fraction > 0.0
     assert backend.config.behavior.search_leg_duration_s > 0.0
     assert backend.config.behavior.search_duty_fraction < 1.0
-    assert backend.config.behavior.food_sufficient_peak_fraction > 0.0
+    assert backend.config.behavior.food_sufficient_reserve_ratio > 0.0
     assert torch.equal(
         advanced.accepted_effort_fraction,
         backend.last_interval.motion.ledger.selected.effort_fraction.cpu(),
