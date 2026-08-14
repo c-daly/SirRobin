@@ -332,6 +332,49 @@ def test_food_sufficiency_scales_reserve_target_with_structure() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    ("reserve_ratio", "structure_q", "target_q"),
+    [
+        pytest.param(1.0, 2**53 + 1, 2**53 + 1, id="unit-ratio"),
+        pytest.param(0.5, 2**54 + 2, 2**53 + 1, id="fractional-ratio"),
+    ],
+)
+def test_food_sufficiency_preserves_large_integer_ordering(
+    reserve_ratio: float,
+    structure_q: int,
+    target_q: int,
+) -> None:
+    world, population = _fixture(live_bodies=2)
+    population = replace(
+        population,
+        structure_q=population.structure_q.new_tensor(
+            [[structure_q, structure_q]]
+        ),
+        reserve_q=population.reserve_q.new_tensor(
+            [[target_q - 1, target_q]]
+        ),
+    )
+
+    step = request_living_intent(
+        population,
+        world.body,
+        world.live_state,
+        world.economy_state.bp_q,
+        world.geometry,
+        world.live_config,
+        BehaviorConfig(
+            0.6,
+            food_sufficient_reserve_ratio=reserve_ratio,
+            food_cruise_effort_fraction=0.1,
+        ),
+        q_mass_mol=world.economy_config.q_mass_mol,
+    )
+
+    assert step.food_sufficient.tolist() == [[False, True]]
+    assert step.seeking.tolist() == [[True, False]]
+    assert step.cruising.tolist() == [[False, True]]
+
+
 def test_reserve_sufficiency_without_local_food_does_not_cruise() -> None:
     world, population = _fixture(gradient=False, gx=4, gy=4)
     producer_q = torch.zeros_like(world.economy_state.bp_q)
@@ -440,11 +483,12 @@ def test_device_behavior_is_one_full_graph() -> None:
         world.economy_state.bp_q,
         world.geometry,
         world.live_config,
-        BehaviorConfig(0.75),
+        BehaviorConfig(0.75, food_sufficient_reserve_ratio=0.5),
         q_mass_mol=world.economy_config.q_mass_mol,
     )
 
     assert actual.requested_effort_fraction.tolist() == [
-        [pytest.approx(0.75), 0.0]
+        [0.0, 0.0]
     ]
+    assert actual.food_sufficient.tolist() == [[True, False]]
     assert actual.invalid.tolist() == [[False, False]]

@@ -75,6 +75,76 @@ class BehaviorStep:
     invalid: torch.Tensor
 
 
+def _reserve_meets_ratio(
+    reserve_q: torch.Tensor,
+    structure_q: torch.Tensor,
+    ratio: int | float,
+) -> torch.Tensor:
+    """Compare ``reserve_q / structure_q`` with ``ratio`` exactly.
+
+    A float conversion cannot distinguish every permitted int64 inventory.  This
+    uses the continued-fraction comparison algorithm instead, so neither operand
+    is rounded and no cross-product can overflow int64.
+    """
+
+    if ratio <= 0.0:
+        return torch.ones_like(reserve_q, dtype=torch.bool)
+    if ratio == 1.0:
+        return reserve_q >= structure_q
+
+    if isinstance(ratio, int):
+        right_num, right_den = ratio, 1
+    else:
+        right_num, right_den = ratio.as_integer_ratio()
+
+    undecided = structure_q > 0
+    less = torch.zeros_like(undecided)
+    left_num = reserve_q
+    left_den = structure_q
+    inverted = False
+    int64_max = torch.iinfo(torch.int64).max
+
+    while True:
+        safe_den = torch.where(undecided, left_den, torch.ones_like(left_den))
+        left_whole = torch.div(left_num, safe_den, rounding_mode="floor")
+        left_rem = torch.remainder(left_num, safe_den)
+        right_whole, right_rem = divmod(right_num, right_den)
+
+        if right_whole > int64_max:
+            whole_less = undecided
+            whole_greater = torch.zeros_like(undecided)
+            whole_equal = torch.zeros_like(undecided)
+        else:
+            whole_less = undecided & (left_whole < right_whole)
+            whole_greater = undecided & (left_whole > right_whole)
+            whole_equal = undecided & (left_whole == right_whole)
+        less = less | (whole_greater if inverted else whole_less)
+        undecided = whole_equal
+
+        if right_rem == 0:
+            remainder_greater = undecided & (left_rem > 0)
+            less = less | (
+                remainder_greater
+                if inverted
+                else torch.zeros_like(remainder_greater)
+            )
+            break
+
+        left_is_integer = undecided & (left_rem == 0)
+        less = less | (
+            torch.zeros_like(left_is_integer) if inverted else left_is_integer
+        )
+        undecided = undecided & (left_rem > 0)
+        left_num, left_den = (
+            torch.where(undecided, left_den, torch.zeros_like(left_den)),
+            torch.where(undecided, left_rem, torch.ones_like(left_rem)),
+        )
+        right_num, right_den = right_den, right_rem
+        inverted = not inverted
+
+    return ~less
+
+
 def request_living_intent(
     population: PopulationState,
     body: DevelopedBody,
@@ -116,16 +186,17 @@ def request_living_intent(
     gradient_heading = horizontal / magnitude[..., None].clamp_min(
         torch.finfo(horizontal.dtype).tiny
     )
-    reserve_target_q = (
-        population.structure_q.to(sample.value_mol_m3.dtype)
-        * config.food_sufficient_reserve_ratio
+    reserve_target_met = _reserve_meets_ratio(
+        population.reserve_q,
+        population.structure_q,
+        config.food_sufficient_reserve_ratio,
     )
     food_sufficient = (
         alive
         & valid_sample
         & (config.food_sufficient_reserve_ratio > 0.0)
         & (sample.value_mol_m3 > 0.0)
-        & (population.reserve_q.to(reserve_target_q.dtype) >= reserve_target_q)
+        & reserve_target_met
     )
     seeking = gradient_present & ~food_sufficient
 
