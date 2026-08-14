@@ -726,11 +726,66 @@ times its displacement. Several flat-field searchers instead produced path ratio
 near 1.03-1.07. The evidence therefore continues to locate the tight food-patch
 paths in the abrupt seek/cruise policy boundary, not in Unity interpolation alone.
 
+## Local reserve-policy comparison (2026-08-13)
+
+The bounded behavior tranche removed the world's peak producer concentration from
+organism decisions. Food sufficiency now compares each organism's reserve against a
+morphology-scaled structure target and requires producer matter in its local sample.
+When a local horizontal gradient exists, both seeking and low-effort cruising request
+that local heading. A remote producer spike leaves the local sample, sufficiency,
+and requested heading unchanged. Independent negative controls also show that equal
+reserves can produce different modes for different structure quantities and that a
+reserve-sufficient organism does not cruise in a zero-producer field.
+
+The same 30-second compiled-CUDA diagnostic with seed 20260809 covered 3,062
+identity-intervals across 15 identities: 1,342 seeking, 1,083 searching, 60 cruising,
+and 577 idle, with exact books closed. This is a comparative characterization, not
+an optimization score. Tight paths remain possible: founder 1 accumulated 13.21 rad
+absolute yaw and traveled 4.03 times its displacement; founder 4 accumulated 12.68
+rad and traveled 3.44 times its displacement. The tranche therefore removes an
+unphysical nonlocal input but does not claim to eliminate milling, improve survival,
+or optimize population outcomes.
+
+A crash-recovery rerun on 2026-08-14 reproduced those aggregate counts and the
+per-founder path and yaw measurements exactly on CUDA. The cold Blackwell compile
+was long but completed normally, and the rerun again closed the conservation books.
+
+The established complete-world CUDA regression cell remains healthy. At 5,000
+slots, one untimed warmup plus three measured intervals produced 0.654 simulated
+s/s; the less noisy 50-interval form produced 1.836 simulated s/s, exact books
+closed, and no invalid state. The previous 50-interval observation was 1.152
+simulated s/s. This benchmark supplies explicit effort and does not execute the
+autonomous policy, so the difference is run variation rather than evidence that the
+policy improved throughput.
+
+Verification after independent review completed with 47 focused behavior, Unity-
+server, and diagnostic tests passing; focused Ruff and `git diff --check` clean; and
+the full Python suite at 420 passed. The reviewer initially required independent
+coverage of morphology scaling and local producer presence. Both controls were
+added, re-reviewed, and accepted with no Critical or Important findings remaining.
+
+Fresh crash-recovery validation on 2026-08-13 and 2026-08-14 separated the device
+gates: the WSL CPU portion passed 413 tests with 7 GPU tests deselected, and the
+seven GPU-marked tests then passed on the RTX 5070. Whole-tree Ruff also passed.
+The configured import-boundary check kept 6 contracts and reported 1 existing
+violation: `sirrobin.physics.ecological_motion` and
+`sirrobin.physics.phase_response` import `sirrobin.fields.geometry`. Those modules
+are outside this five-file policy change; the result is disclosed rather than
+treated as a policy-tranche regression or silently described as green.
+
+Fresh Unity Play Mode validation used the existing read-only viewer against this
+worktree's prewarmed CUDA server. The editor compiled without errors, connected to
+the observability stream, and accepted live records through at least 15 simulated
+seconds; its logs recorded population growth from 8 to 10 and both corresponding
+birth events. The server continued cleanly to 27 simulated seconds before the
+intentional Play Mode stop disconnected the client. No runtime error appeared in
+the Unity console; the only warning was Coplay's unrelated unsupported-toolbar API
+notice. The temporary server and editor were stopped after the observation.
+
 ## Current decision
 
-The next scientific performance decision is a genuinely packed candidate batch or
-a justified cadence/response model for remaining hot-loop cost. The next behavior
-decision is a separate evidence-driven policy tranche: remove nonlocal world-peak
-knowledge and compare a local reserve/intake-driven policy against this frozen
-characterization. Neither workstream may tune survival, population, or visual path
-shape as a hidden success condition.
+The next scientific performance decision remains a genuinely packed candidate
+batch or a justified cadence/response model for remaining hot-loop cost. The local
+reserve policy should now be observed at population scale before adding hunger,
+satiation, sensory memory, or another state. Neither workstream may tune survival,
+population, throughput, or visual path shape as a hidden success condition.

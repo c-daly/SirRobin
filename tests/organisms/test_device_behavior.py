@@ -6,19 +6,29 @@ import pytest
 import torch
 
 from sirrobin.economy.config import EconomyConfig
-from sirrobin.organisms.behavior import BehaviorConfig, request_living_intent
+from sirrobin.organisms.behavior import (
+    BehaviorConfig,
+    _reserve_meets_ratio,
+    request_living_intent,
+)
 from sirrobin.organisms.state import PopulationState
 from tools.run_world import _build_fixture_world
 
 
-def _fixture(*, gradient: bool = True, live_bodies: int = 1):
+def _fixture(
+    *,
+    gradient: bool = True,
+    live_bodies: int = 1,
+    gx: int = 2,
+    gy: int = 1,
+):
     economy = replace(
         EconomyConfig(),
-        gx=2,
-        gy=1,
+        gx=gx,
+        gy=gy,
         gz=2,
-        lx_m=2.0,
-        ly_m=1.0,
+        lx_m=float(gx),
+        ly_m=float(gy),
         lz_m=2.0,
         dt_eco_s=0.1,
         remin_floor_s=1.0e-4,
@@ -35,6 +45,7 @@ def _fixture(*, gradient: bool = True, live_bodies: int = 1):
         world.economy_state.bp_q[0, 0, 0, 0] = 500_000
         world.economy_state.bp_q[0, 1, 0, 0] = 1_500_000
     world.live_state.position_enu_m[..., 0] = 1.0
+    world.live_state.position_enu_m[..., 1] = 0.5
     alive = world.body.alive
     zeros_i64 = torch.zeros_like(alive, dtype=torch.int64)
     zeros_f64 = torch.zeros_like(alive, dtype=torch.float64)
@@ -227,7 +238,7 @@ def test_flat_field_search_uses_paused_straight_legs() -> None:
     assert initial.motion.heading_initialized.tolist() == [[True, True]]
 
 
-def test_food_rich_gradient_cruises_forward_instead_of_milling() -> None:
+def test_reserve_sufficient_gradient_cruises_toward_local_food() -> None:
     world, population = _fixture()
     world.live_state.yaw_rad.fill_(torch.pi / 2.0)
 
@@ -243,7 +254,7 @@ def test_food_rich_gradient_cruises_forward_instead_of_milling() -> None:
             search_effort_fraction=0.25,
             search_leg_duration_s=8.0,
             search_duty_fraction=0.5,
-            food_sufficient_peak_fraction=0.5,
+            food_sufficient_reserve_ratio=0.5,
             food_cruise_effort_fraction=0.1,
         ),
         q_mass_mol=world.economy_config.q_mass_mol,
@@ -258,15 +269,203 @@ def test_food_rich_gradient_cruises_forward_instead_of_milling() -> None:
     ]
     assert torch.allclose(
         step.requested_heading_enu[0, 0],
-        step.requested_heading_enu.new_tensor([0.0, 1.0]),
+        step.requested_heading_enu.new_tensor([1.0, 0.0]),
         atol=1.0e-6,
     )
+
+
+def test_reserve_shortfall_keeps_seeking_in_local_food() -> None:
+    world, population = _fixture()
+    population = replace(
+        population,
+        reserve_q=torch.where(
+            population.alive,
+            torch.full_like(population.reserve_q, 499),
+            population.reserve_q,
+        ),
+    )
+
+    step = request_living_intent(
+        population,
+        world.body,
+        world.live_state,
+        world.economy_state.bp_q,
+        world.geometry,
+        world.live_config,
+        BehaviorConfig(
+            0.6,
+            food_sufficient_reserve_ratio=0.5,
+            food_cruise_effort_fraction=0.1,
+        ),
+        q_mass_mol=world.economy_config.q_mass_mol,
+    )
+
+    assert step.seeking.tolist() == [[True, False]]
+    assert not bool(step.cruising.any())
+    assert step.requested_effort_fraction.tolist() == [[pytest.approx(0.6), 0.0]]
+
+
+def test_food_sufficiency_scales_reserve_target_with_structure() -> None:
+    world, population = _fixture(live_bodies=2)
+    population = replace(
+        population,
+        structure_q=population.structure_q.new_tensor([[1_000, 2_000]]),
+        reserve_q=population.reserve_q.new_tensor([[750, 750]]),
+    )
+
+    step = request_living_intent(
+        population,
+        world.body,
+        world.live_state,
+        world.economy_state.bp_q,
+        world.geometry,
+        world.live_config,
+        BehaviorConfig(
+            0.6,
+            food_sufficient_reserve_ratio=0.5,
+            food_cruise_effort_fraction=0.1,
+        ),
+        q_mass_mol=world.economy_config.q_mass_mol,
+    )
+
+    assert step.food_sufficient.tolist() == [[True, False]]
+    assert step.seeking.tolist() == [[False, True]]
+    assert step.cruising.tolist() == [[True, False]]
+    assert step.requested_effort_fraction.tolist() == [
+        [pytest.approx(0.1), pytest.approx(0.6)]
+    ]
+
+
+@pytest.mark.parametrize(
+    ("reserve_ratio", "structure_q", "target_q"),
+    [
+        pytest.param(1.0, 2**53 + 1, 2**53 + 1, id="unit-ratio"),
+        pytest.param(0.5, 2**54 + 2, 2**53 + 1, id="fractional-ratio"),
+    ],
+)
+def test_food_sufficiency_preserves_large_integer_ordering(
+    reserve_ratio: float,
+    structure_q: int,
+    target_q: int,
+) -> None:
+    world, population = _fixture(live_bodies=2)
+    population = replace(
+        population,
+        structure_q=population.structure_q.new_tensor(
+            [[structure_q, structure_q]]
+        ),
+        reserve_q=population.reserve_q.new_tensor(
+            [[target_q - 1, target_q]]
+        ),
+    )
+
+    step = request_living_intent(
+        population,
+        world.body,
+        world.live_state,
+        world.economy_state.bp_q,
+        world.geometry,
+        world.live_config,
+        BehaviorConfig(
+            0.6,
+            food_sufficient_reserve_ratio=reserve_ratio,
+            food_cruise_effort_fraction=0.1,
+        ),
+        q_mass_mol=world.economy_config.q_mass_mol,
+    )
+
+    assert step.food_sufficient.tolist() == [[False, True]]
+    assert step.seeking.tolist() == [[True, False]]
+    assert step.cruising.tolist() == [[False, True]]
+
+
+def test_reserve_ratio_comparison_handles_terminating_left_fraction() -> None:
+    normal_phase = _reserve_meets_ratio(
+        torch.tensor([0]),
+        torch.tensor([5]),
+        0.5,
+    )
+    inverted_phase = _reserve_meets_ratio(
+        torch.tensor([1]),
+        torch.tensor([2]),
+        0.4,
+    )
+
+    assert normal_phase.tolist() == [False]
+    assert inverted_phase.tolist() == [True]
+
+
+def test_reserve_sufficiency_without_local_food_does_not_cruise() -> None:
+    world, population = _fixture(gradient=False, gx=4, gy=4)
+    producer_q = torch.zeros_like(world.economy_state.bp_q)
+
+    step = request_living_intent(
+        population,
+        world.body,
+        world.live_state,
+        producer_q,
+        world.geometry,
+        world.live_config,
+        BehaviorConfig(
+            0.6,
+            food_sufficient_reserve_ratio=0.5,
+            food_cruise_effort_fraction=0.1,
+        ),
+        q_mass_mol=world.economy_config.q_mass_mol,
+    )
+
+    assert step.sampled_producer_mol_m3.tolist() == [[0.0, 0.0]]
+    assert not bool(step.food_sufficient.any())
+    assert not bool(step.cruising.any())
+
+
+def test_remote_world_peak_does_not_change_local_food_decision() -> None:
+    world, population = _fixture(gx=4, gy=4)
+    remote_peak = world.economy_state.bp_q.clone()
+    remote_peak[0, 2, 2, :] = 2_000_000_000
+    config = BehaviorConfig(
+        0.6,
+        food_sufficient_reserve_ratio=0.5,
+        food_cruise_effort_fraction=0.1,
+    )
+
+    local = request_living_intent(
+        population,
+        world.body,
+        world.live_state,
+        world.economy_state.bp_q,
+        world.geometry,
+        world.live_config,
+        config,
+        q_mass_mol=world.economy_config.q_mass_mol,
+    )
+    remote = request_living_intent(
+        population,
+        world.body,
+        world.live_state,
+        remote_peak,
+        world.geometry,
+        world.live_config,
+        config,
+        q_mass_mol=world.economy_config.q_mass_mol,
+    )
+
+    assert torch.equal(local.sampled_producer_mol_m3, remote.sampled_producer_mol_m3)
+    assert torch.equal(local.producer_gradient_mol_m4, remote.producer_gradient_mol_m4)
+    assert torch.equal(local.food_sufficient, remote.food_sufficient)
+    assert torch.equal(local.requested_heading_enu, remote.requested_heading_enu)
 
 
 @pytest.mark.parametrize("duration", [-0.1, float("inf"), float("nan"), True])
 def test_behavior_rejects_malformed_search_leg_duration(duration: float) -> None:
     with pytest.raises((TypeError, ValueError)):
         BehaviorConfig(0.5, search_leg_duration_s=duration).validate()
+
+
+@pytest.mark.parametrize("ratio", [-0.1, float("inf"), float("nan"), True])
+def test_behavior_rejects_malformed_food_reserve_ratio(ratio: float) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        BehaviorConfig(0.5, food_sufficient_reserve_ratio=ratio).validate()
 
 
 def test_behavior_stops_powering_gait_above_the_body_wave_speed() -> None:
@@ -304,11 +503,12 @@ def test_device_behavior_is_one_full_graph() -> None:
         world.economy_state.bp_q,
         world.geometry,
         world.live_config,
-        BehaviorConfig(0.75),
+        BehaviorConfig(0.75, food_sufficient_reserve_ratio=0.5),
         q_mass_mol=world.economy_config.q_mass_mol,
     )
 
     assert actual.requested_effort_fraction.tolist() == [
-        [pytest.approx(0.75), 0.0]
+        [0.0, 0.0]
     ]
+    assert actual.food_sufficient.tolist() == [[True, False]]
     assert actual.invalid.tolist() == [[False, False]]
