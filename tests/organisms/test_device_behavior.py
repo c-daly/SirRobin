@@ -6,7 +6,11 @@ import pytest
 import torch
 
 from sirrobin.economy.config import EconomyConfig
-from sirrobin.organisms.behavior import BehaviorConfig, request_living_intent
+from sirrobin.organisms.behavior import (
+    BehaviorConfig,
+    _reserve_meets_ratio,
+    request_living_intent,
+)
 from sirrobin.organisms.state import PopulationState
 from tools.run_world import _build_fixture_world
 
@@ -373,6 +377,22 @@ def test_food_sufficiency_preserves_large_integer_ordering(
     assert step.food_sufficient.tolist() == [[False, True]]
     assert step.seeking.tolist() == [[True, False]]
     assert step.cruising.tolist() == [[False, True]]
+
+
+def test_reserve_ratio_comparison_handles_terminating_left_fraction() -> None:
+    normal_phase = _reserve_meets_ratio(
+        torch.tensor([0]),
+        torch.tensor([5]),
+        0.5,
+    )
+    inverted_phase = _reserve_meets_ratio(
+        torch.tensor([1]),
+        torch.tensor([2]),
+        0.4,
+    )
+
+    assert normal_phase.tolist() == [False]
+    assert inverted_phase.tolist() == [True]
 
 
 def test_reserve_sufficiency_without_local_food_does_not_cruise() -> None:

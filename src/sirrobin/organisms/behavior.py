@@ -132,7 +132,7 @@ def _reserve_meets_ratio(
 
         left_is_integer = undecided & (left_rem == 0)
         less = less | (
-            torch.zeros_like(left_is_integer) if inverted else left_is_integer
+            left_is_integer if not inverted else torch.zeros_like(left_is_integer)
         )
         undecided = undecided & (left_rem > 0)
         left_num, left_den = (
