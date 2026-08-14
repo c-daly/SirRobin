@@ -46,6 +46,8 @@ from sirrobin.runtime.step import (
     LivingIntervalLedger,
     LivingKernels,
     advance_living_interval_with_kernels,
+    defer_birth_candidates,
+    prepare_birth_candidates_with_kernels,
 )
 
 
@@ -119,6 +121,39 @@ class _StagedMotionKernel:
         )
 
 
+class _DenseCandidateKernel:
+    def __init__(
+        self,
+        mutation_kernel: Any,
+        development_kernel: Any,
+        structure_cost_kernel: Any,
+    ) -> None:
+        self.mutation_kernel = mutation_kernel
+        self.development_kernel = development_kernel
+        self.structure_cost_kernel = structure_cost_kernel
+
+    def __call__(
+        self,
+        genotype,
+        body,
+        requested_birth,
+        event_index,
+        mutation_config,
+        development_config,
+    ):
+        return prepare_birth_candidates_with_kernels(
+            genotype,
+            body,
+            requested_birth,
+            event_index,
+            mutation_config,
+            development_config,
+            mutation_kernel=self.mutation_kernel,
+            development_kernel=self.development_kernel,
+            structure_cost_kernel=self.structure_cost_kernel,
+        )
+
+
 class RuntimeSession:
     """Own current state, compiled kernels, and bounded host synchronization.
 
@@ -136,10 +171,13 @@ class RuntimeSession:
         compile_domains: bool = False,
         optimistic_motion: bool = True,
         optimistic_feeding: bool = True,
+        optimistic_candidates: bool = True,
         compile_backend: str | None = None,
     ) -> None:
         validate_living_runtime_config(config)
         validate_living_state(state, config.economy)
+        if not isinstance(optimistic_candidates, bool):
+            raise TypeError("optimistic candidates must be boolean")
         compile_options: dict[str, Any] = {
             "fullgraph": True,
             "dynamic": False,
@@ -162,16 +200,28 @@ class RuntimeSession:
             EAGER_LIVING_KERNELS,
             motion=fast_motion,
         )
+        robust_candidates = kernels.candidates
         if compile_domains:
+            candidate_mutation = compiled(propose_offspring_mutations)
+            candidate_development = compiled(develop_unchecked)
+            candidate_structure_cost = compiled(target_structure_cost_q)
+            robust_candidates = _DenseCandidateKernel(
+                candidate_mutation,
+                candidate_development,
+                candidate_structure_cost,
+            )
+            fast_candidates = (
+                compiled(defer_birth_candidates)
+                if optimistic_candidates
+                else robust_candidates
+            )
             kernels = LivingKernels(
                 motion=kernels.motion,
                 economy=compiled(advance_economy_unchecked),
                 feeding=compiled(feed_population),
                 organisms=compiled(advance_organism_interval),
                 returns=compiled(deposit_organism_returns),
-                mutation=compiled(propose_offspring_mutations),
-                develop_candidates=compiled(develop_unchecked),
-                structure_cost=compiled(target_structure_cost_q),
+                candidates=fast_candidates,
                 commit_mutation=compiled(commit_offspring_mutations),
                 body_cache=compiled(commit_developed_births),
                 development=compiled(settle_development_lifecycle),
@@ -182,7 +232,11 @@ class RuntimeSession:
             else request_living_intent
         )
         self._kernels = kernels
-        self._robust_kernels = replace(kernels, motion=robust_motion)
+        self._robust_kernels = replace(
+            kernels,
+            motion=robust_motion,
+            candidates=robust_candidates,
+        )
         self._optimistic_motion = optimistic_motion
         self._robust_config = config
         self._fast_config = (
@@ -194,6 +248,7 @@ class RuntimeSession:
             else config
         )
         self._optimistic_feeding = self._fast_config is not config
+        self._optimistic_candidates = optimistic_candidates and compile_domains
         self._state = state
         self.config = config
 
@@ -204,6 +259,10 @@ class RuntimeSession:
     @property
     def optimistic_motion_enabled(self) -> bool:
         return self._optimistic_motion
+
+    @property
+    def optimistic_candidates_enabled(self) -> bool:
+        return self._optimistic_candidates
 
     @staticmethod
     def _validate_intervals(intervals: int) -> None:
@@ -301,6 +360,7 @@ class RuntimeSession:
             )
             funding_unresolved = torch.zeros_like(invalid)
             feeding_unresolved = torch.zeros_like(invalid)
+            candidate_replay_required = torch.zeros_like(invalid)
             zeros_i64 = torch.zeros_like(invalid, dtype=torch.int64)
             zeros_f64 = torch.zeros_like(invalid, dtype=torch.float64)
             births = zeros_i64.clone()
@@ -359,6 +419,9 @@ class RuntimeSession:
                 funding_unresolved |= advance.ledger.motion_funding_unresolved
                 feeding_unresolved |= (
                     advance.ledger.feeding_allocation_unresolved
+                )
+                candidate_replay_required |= (
+                    advance.ledger.candidate_replay_required
                 )
                 lifecycle = advance.ledger.organisms.lifecycle.ledger
                 metabolism = advance.ledger.organisms.metabolism.ledger
@@ -467,6 +530,7 @@ class RuntimeSession:
                 invalid,
                 funding_unresolved,
                 feeding_unresolved,
+                candidate_replay_required,
                 summary,
             )
 
@@ -478,15 +542,26 @@ class RuntimeSession:
             invalid,
             funding_unresolved,
             feeding_unresolved,
+            candidate_replay_required,
             summary,
         ) = result
         status = torch.stack(
-            (invalid, funding_unresolved, feeding_unresolved)
+            (
+                invalid,
+                funding_unresolved,
+                feeding_unresolved,
+                candidate_replay_required,
+            )
         ).cpu()
         retry_motion = self._optimistic_motion and bool(status[1].any())
         retry_feeding = self._optimistic_feeding and bool(status[2].any())
-        if retry_motion or retry_feeding:
-            retry_kernels = self._robust_kernels if retry_motion else self._kernels
+        retry_candidates = self._optimistic_candidates and bool(status[3].any())
+        if retry_motion or retry_feeding or retry_candidates:
+            retry_kernels = (
+                self._robust_kernels
+                if retry_motion or retry_candidates
+                else self._kernels
+            )
             retry_config = self._robust_config if retry_feeding else self._fast_config
             result = run_candidate(retry_kernels, retry_config)
             (
@@ -496,10 +571,16 @@ class RuntimeSession:
                 invalid,
                 funding_unresolved,
                 feeding_unresolved,
+                candidate_replay_required,
                 summary,
             ) = result
             status = torch.stack(
-                (invalid, funding_unresolved, feeding_unresolved)
+                (
+                    invalid,
+                    funding_unresolved,
+                    feeding_unresolved,
+                    candidate_replay_required,
+                )
             ).cpu()
         if bool(status[0].any()):
             failure_masks = {
@@ -578,7 +659,11 @@ class RuntimeSession:
             self._fast_config,
             self._kernels,
         )
-        if self._optimistic_motion or self._optimistic_feeding:
+        if (
+            self._optimistic_motion
+            or self._optimistic_feeding
+            or self._optimistic_candidates
+        ):
             advance_living_interval_with_kernels(
                 controlled,
                 inputs,

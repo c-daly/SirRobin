@@ -146,6 +146,62 @@ class MutationStep:
     ledger: MutationLedger
 
 
+def empty_mutation_step(
+    genotype: GenotypeBatch,
+    event_slots: int,
+) -> MutationStep:
+    """Return the neutral ledger used before deferred candidate replay."""
+
+    worlds, capacity = genotype.alive.shape
+    device = genotype.alive.device
+    zeros_bool = torch.zeros_like(genotype.alive)
+    zeros_i64 = torch.zeros_like(genotype.stable_id)
+    negative_i64 = torch.full_like(genotype.stable_id, -1)
+    zeros_float = torch.zeros_like(genotype.swim_freq_hz)
+    event_shape = (worlds, capacity, event_slots)
+    return MutationStep(
+        genotype,
+        MutationLedger(
+            mutated=zeros_bool,
+            trait_code=zeros_i64,
+            locus=negative_i64,
+            component=negative_i64,
+            parent_value=zeros_float,
+            child_value=zeros_float,
+            unavailable=zeros_bool,
+            mutation_count=zeros_i64,
+            event_applied=torch.zeros(event_shape, dtype=torch.bool, device=device),
+            event_trait_code=torch.zeros(
+                event_shape,
+                dtype=torch.int64,
+                device=device,
+            ),
+            event_locus=torch.full(
+                event_shape,
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            event_component=torch.full(
+                event_shape,
+                -1,
+                dtype=torch.int64,
+                device=device,
+            ),
+            event_parent_value=torch.zeros(
+                event_shape,
+                dtype=zeros_float.dtype,
+                device=device,
+            ),
+            event_child_value=torch.zeros(
+                event_shape,
+                dtype=zeros_float.dtype,
+                device=device,
+            ),
+        ),
+    )
+
+
 def _gather_parent(values: torch.Tensor, parent_slot: torch.Tensor) -> torch.Tensor:
     tail = values.shape[2:]
     index = parent_slot[(...,) + (None,) * len(tail)].expand(

@@ -117,6 +117,60 @@ def _fixture(
     return state, inputs, config
 
 
+def test_session_replays_dense_candidates_on_a_birth_request() -> None:
+    state, inputs, config = _fixture()
+    expected = state
+    for _ in range(2):
+        expected = advance_living_interval(expected, inputs, config).state
+    session = RuntimeSession(
+        state,
+        config,
+        compile_motion=False,
+        compile_domains=True,
+        compile_backend="eager",
+    )
+
+    actual = session.advance_chunk(inputs, intervals=2)
+
+    assert torch.equal(actual.state.population.alive, expected.population.alive)
+    assert torch.equal(
+        actual.state.population.reserve_q,
+        expected.population.reserve_q,
+    )
+    assert torch.equal(actual.state.genotype.node_mask, expected.genotype.node_mask)
+    assert actual.summary is not None
+    assert actual.summary.births.tolist() == [2]
+    assert actual.last_interval.candidate_work_deferred.tolist() == [False]
+    assert actual.last_interval.candidate_slots_evaluated.tolist() == [3]
+    assert actual.last_interval.candidate_replay_required.tolist() == [False]
+    assert actual.last_interval.matter.books_closed.tolist() == [True]
+
+
+def test_session_defers_zero_request_candidate_work_without_replay() -> None:
+    state, inputs, config = _fixture()
+    inputs = replace(inputs, birth_requested=torch.zeros_like(inputs.birth_requested))
+    expected = advance_living_interval(state, inputs, config)
+    session = RuntimeSession(
+        state,
+        config,
+        compile_motion=False,
+        compile_domains=True,
+        compile_backend="eager",
+    )
+
+    actual = session.advance_chunk(inputs, intervals=1)
+
+    assert torch.equal(
+        actual.state.population.reserve_q,
+        expected.state.population.reserve_q,
+    )
+    assert torch.equal(actual.state.genotype.node_mask, expected.state.genotype.node_mask)
+    assert actual.last_interval.candidate_work_deferred.tolist() == [True]
+    assert actual.last_interval.candidate_slots_evaluated.tolist() == [0]
+    assert actual.last_interval.candidate_replay_required.tolist() == [False]
+    assert actual.last_interval.matter.books_closed.tolist() == [True]
+
+
 def test_complete_interval_closes_matter_and_commits_a_mutated_paid_birth() -> None:
     state, inputs, config = _fixture()
     original_fields = tuple(value.clone() for value in state.economy.reservoirs)
@@ -129,6 +183,9 @@ def test_complete_interval_closes_matter_and_commits_a_mutated_paid_birth() -> N
     assert step.ledger.organisms.lifecycle.ledger.accepted_births.tolist() == [1]
     assert step.ledger.organisms.lifecycle.ledger.born.sum().item() == 1
     assert step.ledger.mutation.ledger.mutated.sum().item() == 1
+    assert step.ledger.candidate_work_deferred.tolist() == [False]
+    assert step.ledger.candidate_slots_evaluated.tolist() == [3]
+    assert step.ledger.candidate_replay_required.tolist() == [False]
     assert step.state.population.alive.sum().item() == 2
     assert torch.equal(step.state.body.alive, step.state.population.alive)
     assert torch.equal(step.state.body.stable_id, step.state.population.stable_id)
@@ -231,6 +288,9 @@ def test_compiled_cuda_interval_commits_paid_birth_with_exact_books() -> None:
     assert lifecycle.accepted_births.tolist() == [1]
     assert lifecycle.born.sum().item() == 1
     assert chunk.last_interval.mutation.ledger.mutated.sum().item() == 1
+    assert chunk.last_interval.candidate_work_deferred.tolist() == [False]
+    assert chunk.last_interval.candidate_slots_evaluated.tolist() == [3]
+    assert chunk.last_interval.candidate_replay_required.tolist() == [False]
     assert chunk.last_interval.matter.books_closed.tolist() == [True]
     assert chunk.last_interval.invalid.tolist() == [False]
     assert torch.equal(chunk.state.body.alive, chunk.state.population.alive)
@@ -347,6 +407,27 @@ def test_autonomous_session_composes_behavior_and_paid_birth() -> None:
         expected.state.population.reserve_q,
     )
     assert actual.last_interval.matter.books_closed.tolist() == [True]
+    assert actual.last_interval.candidate_work_deferred.tolist() == [False]
+    assert actual.last_interval.candidate_slots_evaluated.tolist() == [3]
+    assert actual.last_interval.candidate_replay_required.tolist() == [False]
+
+
+@pytest.mark.parametrize(
+    "optimistic_candidates",
+    [0, 1, 1.0, "yes", None],
+)
+def test_session_rejects_nonboolean_optimistic_candidates(
+    optimistic_candidates: object,
+) -> None:
+    state, _, config = _fixture()
+
+    with pytest.raises(TypeError, match="optimistic candidates"):
+        RuntimeSession(
+            state,
+            config,
+            compile_motion=False,
+            optimistic_candidates=optimistic_candidates,  # type: ignore[arg-type]
+        )
 
 
 def test_autonomous_prewarm_does_not_advance_authoritative_state() -> None:
