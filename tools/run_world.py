@@ -32,6 +32,7 @@ from sirrobin.physics.live_config import LiveLocomotionConfig
 from sirrobin.runtime.material import total_matter_q
 from sirrobin.runtime.profile import (
     BASELINE_RUNTIME_PROFILE,
+    RUNTIME_PROFILES,
     living_runtime_config_from_reference,
 )
 from sirrobin.runtime.reference_adapter import living_state_from_reference
@@ -140,6 +141,14 @@ class RuntimeWorldRunReport:
     sim_time_s: float
     intervals: int
     compiled_domains: bool
+    optimistic_candidates: bool
+    profile_name: str
+    slot_capacity: int
+    initial_population: int
+    host_chunks: int
+    max_chunk_intervals: int
+    dense_candidate_chunks: int
+    deferred_candidate_chunks: int
     population: int
     initial_fields_q: tuple[int, int, int, int]
     final_fields_q: tuple[int, int, int, int]
@@ -279,6 +288,10 @@ def run_runtime_world(
     *,
     seconds: float,
     bodies: int,
+    live_bodies: int | None = None,
+    profile_name: str = BASELINE_RUNTIME_PROFILE.name,
+    chunk_intervals: int | None = None,
+    optimistic_candidates: bool = True,
     device_name: str,
     economy_interval_s: float = 0.1,
     compile_domains: bool = False,
@@ -289,10 +302,24 @@ def run_runtime_world(
         raise ValueError("seconds must be positive and finite")
     if bodies <= 0:
         raise ValueError("bodies must be positive")
+    if live_bodies is None:
+        initial_population = bodies
+    else:
+        if isinstance(live_bodies, bool) or not isinstance(live_bodies, int):
+            raise TypeError("live bodies must be an integer")
+        initial_population = live_bodies
+    if not 0 <= initial_population <= bodies:
+        raise ValueError("live_bodies must fit inside body capacity")
+    try:
+        profile = RUNTIME_PROFILES[profile_name]
+    except KeyError:
+        raise ValueError(f"unknown runtime profile {profile_name!r}") from None
     if not math.isfinite(economy_interval_s) or economy_interval_s <= 0.0:
         raise ValueError("economy_interval_s must be positive and finite")
     if not isinstance(compile_domains, bool):
         raise TypeError("compile_domains must be bool")
+    if not isinstance(optimistic_candidates, bool):
+        raise TypeError("optimistic candidates must be bool")
     intervals = round(seconds / economy_interval_s)
     if not math.isclose(
         seconds,
@@ -304,6 +331,16 @@ def run_runtime_world(
             "seconds must be an exact multiple of the fixture interval "
             f"{economy_interval_s:g}"
         )
+    if chunk_intervals is None:
+        max_chunk_intervals = intervals
+    else:
+        if (
+            isinstance(chunk_intervals, bool)
+            or not isinstance(chunk_intervals, int)
+            or chunk_intervals < 1
+        ):
+            raise ValueError("chunk intervals must be positive")
+        max_chunk_intervals = min(chunk_intervals, intervals)
     try:
         device = torch.device(device_name)
     except RuntimeError as error:
@@ -316,6 +353,7 @@ def run_runtime_world(
     setup_started = time.perf_counter()
     world = _build_fixture_world(
         bodies=bodies,
+        live_bodies=initial_population,
         device=device,
         economy_interval_s=economy_interval_s,
         material_energy_config=LIVING_MATERIAL_ENERGY_CONFIG,
@@ -326,13 +364,14 @@ def run_runtime_world(
     config = living_runtime_config_from_reference(
         world,
         state,
-        profile=BASELINE_RUNTIME_PROFILE,
+        profile=profile,
     )
     session = RuntimeSession(
         state,
         config,
         compile_motion=compile_domains,
         compile_domains=compile_domains,
+        optimistic_candidates=optimistic_candidates,
         # The live funding census rejected requested-only motion on almost every
         # interval, so the operational runtime enters the exact solver directly.
         optimistic_motion=False,
@@ -354,21 +393,52 @@ def run_runtime_world(
         warmup_wall_time_s = time.perf_counter() - warmup_started
 
     advance_started = time.perf_counter()
-    chunk = session.advance_autonomous_chunk(world.fluid, intervals=intervals)
+    chunks = []
+    remaining_intervals = intervals
+    while remaining_intervals:
+        current_intervals = min(max_chunk_intervals, remaining_intervals)
+        chunk = session.advance_autonomous_chunk(
+            world.fluid,
+            intervals=current_intervals,
+        )
+        chunks.append(chunk)
+        remaining_intervals -= current_intervals
     if device.type == "cuda":
         torch.cuda.synchronize(device)
     advance_wall_time_s = time.perf_counter() - advance_started
-    summary = chunk.summary
-    if summary is None:
+    summaries = [chunk.summary for chunk in chunks]
+    if any(summary is None for summary in summaries):
         raise RuntimeError("autonomous runtime did not return a chunk summary")
+    accepted_summaries = [summary for summary in summaries if summary is not None]
+
+    def sum_int(field: str) -> int:
+        return sum(
+            _tensor_int(getattr(summary, field)) for summary in accepted_summaries
+        )
+
+    def sum_float(field: str) -> float:
+        return sum(
+            _tensor_float(getattr(summary, field))
+            for summary in accepted_summaries
+        )
 
     final = chunk.state
     final_total_q = total_matter_q(final.economy, final.population)
-    books_closed = bool(
-        chunk.last_interval.economy.ledger.books_closed.all().detach().cpu()
-    ) and bool(
-        chunk.last_interval.matter.books_closed.all().detach().cpu()
+    books_closed = all(
+        bool(
+            accepted.last_interval.economy.ledger.books_closed.all()
+            .detach()
+            .cpu()
+        )
+        and bool(accepted.last_interval.matter.books_closed.all().detach().cpu())
+        for accepted in chunks
     ) and torch.equal(final_total_q, final.expected_matter_q)
+    deferred_candidate_chunks = sum(
+        bool(
+            accepted.last_interval.candidate_work_deferred.all().detach().cpu()
+        )
+        for accepted in chunks
+    )
     live = final.population.alive
     live_gait_time = final.motion.gait_time_s[live]
     gait_time = (
@@ -385,8 +455,16 @@ def run_runtime_world(
     return RuntimeWorldRunReport(
         requested_sim_time_s=seconds,
         sim_time_s=float(final.economy.time_s.detach().cpu()),
-        intervals=summary.intervals,
+        intervals=sum(summary.intervals for summary in accepted_summaries),
         compiled_domains=compile_domains,
+        optimistic_candidates=optimistic_candidates,
+        profile_name=profile.name,
+        slot_capacity=bodies,
+        initial_population=initial_population,
+        host_chunks=len(chunks),
+        max_chunk_intervals=max_chunk_intervals,
+        dense_candidate_chunks=len(chunks) - deferred_candidate_chunks,
+        deferred_candidate_chunks=deferred_candidate_chunks,
         population=_tensor_int(live),
         initial_fields_q=initial_fields_q,
         final_fields_q=_field_totals_q(final.economy),
@@ -397,30 +475,24 @@ def run_runtime_world(
         initial_whole_world_q=initial_whole_world_q,
         final_whole_world_q=_tensor_int(final_total_q),
         books_closed=books_closed,
-        births=_tensor_int(summary.births),
-        deaths=_tensor_int(summary.deaths),
-        starvation_deaths=_tensor_int(summary.starvation_deaths),
-        old_age_deaths=_tensor_int(summary.old_age_deaths),
-        requested_births=_tensor_int(summary.requested_births),
-        unfunded_birth_rejections=_tensor_int(summary.unfunded_birth_rejections),
-        capacity_birth_rejections=_tensor_int(summary.capacity_birth_rejections),
-        mutated_births=_tensor_int(summary.mutated_births),
-        mutation_events=_tensor_int(summary.mutation_events),
-        behavior_seeking_intervals=_tensor_int(
-            summary.behavior_seeking_intervals
-        ),
-        behavior_searching_intervals=_tensor_int(
-            summary.behavior_searching_intervals
-        ),
-        behavior_cruising_intervals=_tensor_int(
-            summary.behavior_cruising_intervals
-        ),
-        behavior_idle_intervals=_tensor_int(summary.behavior_idle_intervals),
-        feeding_requested_q=_tensor_int(summary.feeding_requested_q),
-        feeding_actual_debit_q=_tensor_int(summary.feeding_actual_debit_q),
-        feeding_reserve_credit_q=_tensor_int(summary.feeding_reserve_credit_q),
-        dissipation_j=_tensor_float(summary.dissipation_j),
-        light_input_j=_tensor_float(summary.light_input_j),
+        births=sum_int("births"),
+        deaths=sum_int("deaths"),
+        starvation_deaths=sum_int("starvation_deaths"),
+        old_age_deaths=sum_int("old_age_deaths"),
+        requested_births=sum_int("requested_births"),
+        unfunded_birth_rejections=sum_int("unfunded_birth_rejections"),
+        capacity_birth_rejections=sum_int("capacity_birth_rejections"),
+        mutated_births=sum_int("mutated_births"),
+        mutation_events=sum_int("mutation_events"),
+        behavior_seeking_intervals=sum_int("behavior_seeking_intervals"),
+        behavior_searching_intervals=sum_int("behavior_searching_intervals"),
+        behavior_cruising_intervals=sum_int("behavior_cruising_intervals"),
+        behavior_idle_intervals=sum_int("behavior_idle_intervals"),
+        feeding_requested_q=sum_int("feeding_requested_q"),
+        feeding_actual_debit_q=sum_int("feeding_actual_debit_q"),
+        feeding_reserve_credit_q=sum_int("feeding_reserve_credit_q"),
+        dissipation_j=sum_float("dissipation_j"),
+        light_input_j=sum_float("light_input_j"),
         gait_time_min_s=float(gait_time.min().detach().cpu()),
         gait_time_max_s=float(gait_time.max().detach().cpu()),
         positions_sample_enu_m=tuple(
@@ -685,9 +757,20 @@ def format_runtime_report(report: RuntimeWorldRunReport) -> str:
             "SirRobin RuntimeSession run (operational output; not a stable schema)",
             "runtime: cohesive device state and domain kernels",
             f"compiled domains: {'yes' if report.compiled_domains else 'no'}",
+            "optimistic candidates: "
+            f"{'yes' if report.optimistic_candidates else 'no'}",
+            f"runtime profile: {report.profile_name}",
             f"requested simulated time s: {report.requested_sim_time_s:g}",
             f"actual simulated time s: {report.sim_time_s:g}",
             f"authoritative intervals: {report.intervals}",
+            f"slot capacity: {report.slot_capacity}",
+            f"initial population: {report.initial_population}",
+            f"host chunks: {report.host_chunks}",
+            "maximum intervals / host chunk: "
+            f"{report.max_chunk_intervals}",
+            f"dense-candidate host chunks: {report.dense_candidate_chunks}",
+            "deferred-candidate host chunks: "
+            f"{report.deferred_candidate_chunks}",
             f"population: {report.population}",
             f"initial field totals q: {_fields_line(report.initial_fields_q)}",
             f"final field totals q: {_fields_line(report.final_fields_q)}",
@@ -832,6 +915,29 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--seconds", type=float, default=0.1)
     parser.add_argument("--bodies", type=int, default=2)
+    parser.add_argument(
+        "--live-bodies",
+        type=int,
+        default=None,
+        help="initial live population within device-runtime slot capacity",
+    )
+    parser.add_argument(
+        "--profile",
+        choices=tuple(RUNTIME_PROFILES),
+        default=None,
+        help="existing operational profile for the device runtime",
+    )
+    parser.add_argument(
+        "--chunk-intervals",
+        type=int,
+        default=None,
+        help="maximum authoritative intervals per device-runtime host boundary",
+    )
+    parser.add_argument(
+        "--dense-candidates",
+        action="store_true",
+        help="disable optimistic candidate deferral for an exact dense control",
+    )
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument("--economy-interval", type=float, default=0.1)
     parser.add_argument(
@@ -865,6 +971,17 @@ def main(argv: list[str] | None = None) -> int:
         )
     if arguments.runtime == "reference" and arguments.compile is not None:
         parser.error("--compile/--no-compile applies only to --runtime device")
+    lifecycle_control_requested = (
+        arguments.live_bodies is not None
+        or arguments.profile is not None
+        or arguments.chunk_intervals is not None
+        or arguments.dense_candidates
+    )
+    if arguments.runtime == "reference" and lifecycle_control_requested:
+        parser.error(
+            "--live-bodies, --profile, --chunk-intervals, and "
+            "--dense-candidates require --runtime device"
+        )
     try:
         if arguments.runtime == "device":
             compile_domains = (
@@ -875,6 +992,12 @@ def main(argv: list[str] | None = None) -> int:
             runtime_report = run_runtime_world(
                 seconds=arguments.seconds,
                 bodies=arguments.bodies,
+                live_bodies=arguments.live_bodies,
+                profile_name=(
+                    arguments.profile or BASELINE_RUNTIME_PROFILE.name
+                ),
+                chunk_intervals=arguments.chunk_intervals,
+                optimistic_candidates=not arguments.dense_candidates,
                 device_name=arguments.device,
                 economy_interval_s=arguments.economy_interval,
                 compile_domains=compile_domains,
