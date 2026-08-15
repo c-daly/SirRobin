@@ -23,8 +23,41 @@ def _run_world(*arguments: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_run_world_reports_authoritative_state_and_measured_cost() -> None:
+def test_run_world_defaults_to_runtime_session_and_reports_bounded_evidence() -> None:
     completed = _run_world("--seconds", "0.2", "--bodies", "2", "--device", "cpu")
+
+    assert completed.returncode == 0, completed.stderr
+    assert "SirRobin RuntimeSession run (operational output; not a stable schema)" in completed.stdout
+    assert "runtime: cohesive device state and domain kernels" in completed.stdout
+    assert "compiled domains: no" in completed.stdout
+    assert "requested simulated time s: 0.2" in completed.stdout
+    assert "actual simulated time s: 0.2" in completed.stdout
+    assert "authoritative intervals: 2" in completed.stdout
+    assert "population: 2" in completed.stdout
+    assert "initial field totals q: ND=40000000 BP=4000000 BD=500000 BM=0" in completed.stdout
+    assert "initial creature totals q: structure=2000 reserve=10000" in completed.stdout
+    assert "initial whole-world total q: 44512000" in completed.stdout
+    assert "final whole-world total q: 44512000" in completed.stdout
+    assert "exact whole-world books closed: yes" in completed.stdout
+    assert "behavior intervals: " in completed.stdout
+    assert "feeding actual debit q: " in completed.stdout
+    assert "mechanics clock range s: 0.2 .. 0.2" in completed.stdout
+    assert "positions sample ENU m (2/2):" in completed.stdout
+    assert "warmup wall time s: 0.000000" in completed.stdout
+    assert "simulated seconds / wall second:" in completed.stdout
+
+
+def test_run_world_preserves_the_reference_runner_explicitly() -> None:
+    completed = _run_world(
+        "--runtime",
+        "reference",
+        "--seconds",
+        "0.2",
+        "--bodies",
+        "2",
+        "--device",
+        "cpu",
+    )
 
     assert completed.returncode == 0, completed.stderr
     assert "SirRobin composed-world run (operational output; not a stable schema)" in completed.stdout
@@ -51,7 +84,15 @@ def test_run_world_reports_authoritative_state_and_measured_cost() -> None:
 
 def test_run_world_can_explicitly_enable_one_creature_feeding() -> None:
     completed = _run_world(
-        "--seconds", "0.1", "--bodies", "1", "--device", "cpu", "--feed-one"
+        "--runtime",
+        "reference",
+        "--seconds",
+        "0.1",
+        "--bodies",
+        "1",
+        "--device",
+        "cpu",
+        "--feed-one",
     )
 
     assert completed.returncode == 0, completed.stderr
@@ -76,7 +117,9 @@ def test_run_world_can_explicitly_enable_one_creature_feeding() -> None:
 
 
 def test_run_world_rejects_feeding_without_the_scoped_population() -> None:
-    completed = _run_world("--seconds", "0.1", "--bodies", "2", "--feed-one")
+    completed = _run_world(
+        "--runtime", "reference", "--seconds", "0.1", "--bodies", "2", "--feed-one"
+    )
 
     assert completed.returncode != 0
     assert "exactly one body" in completed.stderr
@@ -84,6 +127,8 @@ def test_run_world_rejects_feeding_without_the_scoped_population() -> None:
 
 def test_run_world_exposes_mass_derived_maintenance() -> None:
     completed = _run_world(
+        "--runtime",
+        "reference",
         "--seconds",
         "0.1",
         "--economy-interval",
@@ -109,6 +154,8 @@ def test_run_world_exposes_mass_derived_maintenance() -> None:
 
 def test_run_world_exposes_one_paid_exact_clone_birth() -> None:
     completed = _run_world(
+        "--runtime",
+        "reference",
         "--seconds",
         "0.1",
         "--economy-interval",
@@ -128,6 +175,13 @@ def test_run_world_exposes_one_paid_exact_clone_birth() -> None:
     assert "birth construction heat J: 450" in completed.stdout
     assert "population: 2" in completed.stdout
     assert "exact whole-world books closed: yes" in completed.stdout
+
+
+def test_default_runtime_rejects_reference_only_probes() -> None:
+    completed = _run_world("--seconds", "0.1", "--bodies", "1", "--feed-one")
+
+    assert completed.returncode != 0
+    assert "require --runtime reference" in completed.stderr
 
 
 @pytest.mark.parametrize(
