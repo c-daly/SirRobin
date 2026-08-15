@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -255,6 +256,42 @@ class RuntimeSession:
     @property
     def state(self) -> LivingState:
         return self._state
+
+    def save_checkpoint(self, path: Path | str) -> None:
+        """Save the last accepted state and its complete scientific config."""
+
+        from sirrobin.runtime.checkpoint import save_runtime_checkpoint
+
+        save_runtime_checkpoint(path, self._state, self.config)
+
+    @classmethod
+    def from_checkpoint(
+        cls,
+        path: Path | str,
+        *,
+        device: torch.device | str = "cpu",
+        compile_motion: bool = True,
+        compile_domains: bool = False,
+        optimistic_motion: bool = True,
+        optimistic_feeding: bool = True,
+        optimistic_candidates: bool = True,
+        compile_backend: str | None = None,
+    ) -> RuntimeSession:
+        """Restore authoritative state and select fresh execution policy."""
+
+        from sirrobin.runtime.checkpoint import load_runtime_checkpoint
+
+        state, config = load_runtime_checkpoint(path, device=device)
+        return cls(
+            state,
+            config,
+            compile_motion=compile_motion,
+            compile_domains=compile_domains,
+            optimistic_motion=optimistic_motion,
+            optimistic_feeding=optimistic_feeding,
+            optimistic_candidates=optimistic_candidates,
+            compile_backend=compile_backend,
+        )
 
     @property
     def optimistic_motion_enabled(self) -> bool:
