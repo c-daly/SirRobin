@@ -557,11 +557,17 @@ class RuntimeSession:
         retry_feeding = self._optimistic_feeding and bool(status[2].any())
         retry_candidates = self._optimistic_candidates and bool(status[3].any())
         if retry_motion or retry_feeding or retry_candidates:
-            retry_kernels = (
-                self._robust_kernels
-                if retry_motion or retry_candidates
-                else self._kernels
-            )
+            if retry_motion or retry_candidates:
+                retry_kernels = self._robust_kernels
+            elif self._optimistic_candidates:
+                # Robust feeding can preserve a parent that makes a later birth
+                # request in this chunk, so the only retry must start dense.
+                retry_kernels = replace(
+                    self._kernels,
+                    candidates=self._robust_kernels.candidates,
+                )
+            else:
+                retry_kernels = self._kernels
             retry_config = self._robust_config if retry_feeding else self._fast_config
             result = run_candidate(retry_kernels, retry_config)
             (

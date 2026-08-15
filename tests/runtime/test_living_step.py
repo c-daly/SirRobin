@@ -171,6 +171,108 @@ def test_session_defers_zero_request_candidate_work_without_replay() -> None:
     assert actual.last_interval.matter.books_closed.tolist() == [True]
 
 
+def test_feeding_retry_uses_dense_candidates_for_a_new_late_request() -> None:
+    state, inputs, config = _fixture()
+    economy = state.economy.clone()
+    transferred_q = state.population.reserve_q.sum(dtype=torch.int64)
+    economy.nd_q[0, 0, 0, 0] += transferred_q
+    population = replace(
+        state.population,
+        reserve_q=torch.zeros_like(state.population.reserve_q),
+    )
+    state = replace(state, population=population, economy=economy)
+    config = replace(
+        config,
+        metabolism=replace(config.metabolism, maintenance_w_per_kg=6.0),
+    )
+    validate_living_state(state, config.economy)
+    session = RuntimeSession(
+        state,
+        config,
+        compile_motion=False,
+        compile_domains=True,
+        optimistic_motion=False,
+        compile_backend="eager",
+    )
+    feeding = session._kernels.feeding
+    fast_candidates = session._kernels.candidates
+    dense_candidates = session._robust_kernels.candidates
+    candidate_modes: list[str] = []
+
+    def controlled_feeding(*args):
+        population_before = args[0]
+        producer_before = args[1]
+        dissolved_before = args[2]
+        velocity = torch.ones_like(args[4])
+        feeding_config = args[-1]
+        step = feeding(*args[:4], velocity, *args[5:])
+        if feeding_config.allocation_rounds > 1:
+            return step
+        slot_zeros = torch.zeros_like(step.ledger.actual_debit_q)
+        cell_zeros = torch.zeros_like(step.ledger.producer_debit_by_cell_q)
+        ledger = replace(
+            step.ledger,
+            actual_debit_q=slot_zeros,
+            reserve_credit_q=slot_zeros,
+            dissolved_return_q=slot_zeros,
+            producer_debit_by_cell_q=cell_zeros,
+            dissolved_credit_by_cell_q=cell_zeros,
+            producer_chemical_input_j=torch.zeros_like(
+                step.ledger.producer_chemical_input_j
+            ),
+            reserve_chemical_credit_j=torch.zeros_like(
+                step.ledger.reserve_chemical_credit_j
+            ),
+            assimilation_heat_j=torch.zeros_like(
+                step.ledger.assimilation_heat_j
+            ),
+            allocation_rounds_exhausted=population_before.alive,
+            transaction_committed=torch.zeros_like(
+                step.ledger.transaction_committed
+            ),
+            invalid=torch.ones_like(step.ledger.invalid),
+        )
+        return replace(
+            step,
+            population=population_before,
+            producer_q=producer_before,
+            dissolved_q=dissolved_before,
+            ledger=ledger,
+        )
+
+    def counted_candidates(label, function):
+        def invoke(*args, **kwargs):
+            candidate_modes.append(label)
+            return function(*args, **kwargs)
+
+        return invoke
+
+    session._kernels = replace(
+        session._kernels,
+        feeding=controlled_feeding,
+        candidates=counted_candidates("deferred", fast_candidates),
+    )
+    session._robust_kernels = replace(
+        session._robust_kernels,
+        feeding=controlled_feeding,
+        candidates=counted_candidates("dense", dense_candidates),
+    )
+
+    def late_request_provider(candidate):
+        birth_requested = candidate.population.alive & (
+            candidate.economy.step > 0
+        )
+        return candidate, replace(inputs, birth_requested=birth_requested), None
+
+    actual = session._advance_with_provider(late_request_provider, intervals=2)
+
+    assert candidate_modes == ["deferred", "deferred", "dense", "dense"]
+    assert actual.invalid.tolist() == [False]
+    assert actual.last_interval.candidate_work_deferred.tolist() == [False]
+    assert actual.last_interval.candidate_replay_required.tolist() == [False]
+    assert actual.last_interval.matter.books_closed.tolist() == [True]
+
+
 def test_complete_interval_closes_matter_and_commits_a_mutated_paid_birth() -> None:
     state, inputs, config = _fixture()
     original_fields = tuple(value.clone() for value in state.economy.reservoirs)
