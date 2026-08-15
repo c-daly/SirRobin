@@ -30,9 +30,15 @@ def test_run_world_defaults_to_runtime_session_and_reports_bounded_evidence() ->
     assert "SirRobin RuntimeSession run (operational output; not a stable schema)" in completed.stdout
     assert "runtime: cohesive device state and domain kernels" in completed.stdout
     assert "compiled domains: no" in completed.stdout
+    assert "optimistic candidates: yes" in completed.stdout
+    assert "runtime profile: baseline" in completed.stdout
     assert "requested simulated time s: 0.2" in completed.stdout
     assert "actual simulated time s: 0.2" in completed.stdout
     assert "authoritative intervals: 2" in completed.stdout
+    assert "slot capacity: 2" in completed.stdout
+    assert "initial population: 2" in completed.stdout
+    assert "host chunks: 1" in completed.stdout
+    assert "maximum intervals / host chunk: 2" in completed.stdout
     assert "population: 2" in completed.stdout
     assert "initial field totals q: ND=40000000 BP=4000000 BD=500000 BM=0" in completed.stdout
     assert "initial creature totals q: structure=2000 reserve=10000" in completed.stdout
@@ -45,6 +51,35 @@ def test_run_world_defaults_to_runtime_session_and_reports_bounded_evidence() ->
     assert "positions sample ENU m (2/2):" in completed.stdout
     assert "warmup wall time s: 0.000000" in completed.stdout
     assert "simulated seconds / wall second:" in completed.stdout
+
+
+def test_runtime_can_run_a_birth_capable_population_in_explicit_chunks() -> None:
+    completed = _run_world(
+        "--seconds",
+        "0.2",
+        "--bodies",
+        "3",
+        "--live-bodies",
+        "1",
+        "--profile",
+        "evolution-demo",
+        "--chunk-intervals",
+        "1",
+        "--dense-candidates",
+        "--device",
+        "cpu",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "runtime profile: evolution-demo" in completed.stdout
+    assert "optimistic candidates: no" in completed.stdout
+    assert "slot capacity: 3" in completed.stdout
+    assert "initial population: 1" in completed.stdout
+    assert "host chunks: 2" in completed.stdout
+    assert "maximum intervals / host chunk: 1" in completed.stdout
+    assert "population: 3" in completed.stdout
+    assert int(re.search(r"births: (\d+)", completed.stdout).group(1)) > 0
+    assert "exact whole-world books closed: yes" in completed.stdout
 
 
 def test_run_world_preserves_the_reference_runner_explicitly() -> None:
@@ -182,6 +217,34 @@ def test_default_runtime_rejects_reference_only_probes() -> None:
 
     assert completed.returncode != 0
     assert "require --runtime reference" in completed.stderr
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        (("--bodies", "2", "--live-bodies", "3"), "fit inside body capacity"),
+        (("--chunk-intervals", "0"), "chunk intervals must be positive"),
+    ],
+)
+def test_runtime_rejects_malformed_population_and_chunk_controls(
+    arguments: tuple[str, ...], message: str
+) -> None:
+    completed = _run_world(*arguments)
+
+    assert completed.returncode != 0
+    assert message in completed.stderr
+
+
+def test_reference_runtime_rejects_device_lifecycle_controls() -> None:
+    completed = _run_world(
+        "--runtime",
+        "reference",
+        "--live-bodies",
+        "1",
+    )
+
+    assert completed.returncode != 0
+    assert "require --runtime device" in completed.stderr
 
 
 @pytest.mark.parametrize(
