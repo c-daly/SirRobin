@@ -789,3 +789,52 @@ batch or a justified cadence/response model for remaining hot-loop cost. The loc
 reserve policy should now be observed at population scale before adding hunger,
 satiation, sensory memory, or another state. Neither workstream may tune survival,
 population, throughput, or visual path shape as a hidden success condition.
+
+## Candidate-work follow-up (2026-08-14)
+
+A fresh worktree at base `8e3226c` tested fixed-capacity packed birth candidates
+without changing parent order, mutation identity, candidate pricing, funding, or
+birth acceptance. The packed design was rejected rather than retained. A monolithic
+conditional graph passed a three-slot CUDA control but failed to compile at 5,000
+slots when Triton's pass manager could not lower the fused candidate kernel.
+Separating the domain kernels made the graph runnable, but packing and restoring
+the full parent-indexed genotype, body, and mutation ledger reduced the three-
+interval complete-loop rate to 0.109 simulated s/s. Keeping the payload packed and
+scattering only funding inputs improved that probe, but fixed packing and commit
+orchestration still produced only 0.184-0.341 simulated s/s for one- and 64-slot
+batches. The same-code forced-dense short control produced 0.545 simulated s/s.
+None of the packed variants is present in the retained implementation.
+
+The retained change instead uses the session's existing optimistic replay boundary.
+On a compiled request-free interval it emits a neutral mutation ledger, performs no
+candidate mutation, development, or pricing, and reports zero evaluated candidate
+slots. Any live birth request sets a device-resident replay flag and arrests the
+tentative birth. The flag joins the single aggregate chunk status transfer already
+used for unresolved motion and feeding. The entire chunk is then re-executed from
+the last accepted state with the exact dense mutation/development/pricing kernels;
+only that dense result can be published. The eager authority remains dense, and
+`--dense-candidates` preserves a direct compiled control.
+
+A two-interval control requests a birth in both intervals and compares the replayed
+session with two eager authoritative intervals. Both births, population state,
+genotype, exact matter closure, and final candidate ledger agree. The compiled CUDA
+paid-birth test also completes through dense replay and closes the books. Thus this
+is an execution optimization only: it does not suppress, defer, cap, or reprice an
+accepted birth.
+
+The short 50-interval measurements were noisy enough to reverse ordering (1.633
+simulated s/s with deferred work and 1.792 dense), so acceptance used 200 measured
+intervals after one untimed warmup at 5,000 slots. The retained command produced
+2.381 simulated s/s over 20 simulated seconds; the unchanged dense control produced
+2.000 simulated s/s. Two earlier 200-interval retained-path samples produced 2.297
+and 2.347 simulated s/s. All runs closed exact books and reported no invalid state.
+The final direct comparison is therefore a 19.1% request-free complete-loop gain,
+not evidence about a birth-rich workload.
+
+Fresh verification on the uncommitted worktree passed 422 non-GPU tests with one
+expected skip and seven GPU tests deselected, followed by all seven GPU-marked tests
+on the RTX 5070. Whole-tree Ruff and `git diff --check` passed, and import-linter
+kept all seven configured contracts. The remaining performance risk is explicit:
+any chunk containing a birth request pays for the discarded fast attempt plus exact
+dense replay. Measure birth-rich autonomous workloads before claiming an end-to-end
+evolutionary speedup or revisiting a genuinely packed candidate design.

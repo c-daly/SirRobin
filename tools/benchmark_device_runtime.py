@@ -82,6 +82,7 @@ def benchmark(
     compiled_motion: bool,
     compiled_domains: bool,
     allocation_rounds: int,
+    optimistic_candidates: bool = True,
 ) -> dict[str, int | float | str | bool]:
     state, inputs, config = build_fixture(
         slots,
@@ -94,6 +95,7 @@ def benchmark(
             config,
             compile_motion=compiled_motion or compiled_domains,
             compile_domains=compiled_domains,
+            optimistic_candidates=optimistic_candidates,
         )
         if compiled_motion or compiled_domains
         else None
@@ -130,6 +132,7 @@ def benchmark(
         "compiled_motion": compiled_motion or compiled_domains,
         "compiled_domains": compiled_domains,
         "allocation_rounds": allocation_rounds,
+        "optimistic_candidates": optimistic_candidates,
         "slots": slots,
         "intervals": intervals,
         "wall_s": elapsed_s,
@@ -151,6 +154,7 @@ def main() -> None:
     parser.add_argument("--compiled-motion", action="store_true")
     parser.add_argument("--compiled-domains", action="store_true")
     parser.add_argument("--allocation-rounds", type=int, default=8)
+    parser.add_argument("--dense-candidates", action="store_true")
     args = parser.parse_args()
     device = torch.device(args.device)
     if device.type == "cuda" and not torch.cuda.is_available():
@@ -167,6 +171,7 @@ def main() -> None:
                 config,
                 compile_motion=args.compiled_motion or args.compiled_domains,
                 compile_domains=args.compiled_domains,
+                optimistic_candidates=not args.dense_candidates,
             )
             if args.compiled_motion or args.compiled_domains
             else None
@@ -205,6 +210,7 @@ def main() -> None:
                     compiled_motion=args.compiled_motion,
                     compiled_domains=args.compiled_domains,
                     allocation_rounds=args.allocation_rounds,
+                    optimistic_candidates=not args.dense_candidates,
                 ),
                 sort_keys=True,
             )

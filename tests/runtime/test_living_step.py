@@ -117,6 +117,162 @@ def _fixture(
     return state, inputs, config
 
 
+def test_session_replays_dense_candidates_on_a_birth_request() -> None:
+    state, inputs, config = _fixture()
+    expected = state
+    for _ in range(2):
+        expected = advance_living_interval(expected, inputs, config).state
+    session = RuntimeSession(
+        state,
+        config,
+        compile_motion=False,
+        compile_domains=True,
+        compile_backend="eager",
+    )
+
+    actual = session.advance_chunk(inputs, intervals=2)
+
+    assert torch.equal(actual.state.population.alive, expected.population.alive)
+    assert torch.equal(
+        actual.state.population.reserve_q,
+        expected.population.reserve_q,
+    )
+    assert torch.equal(actual.state.genotype.node_mask, expected.genotype.node_mask)
+    assert actual.summary is not None
+    assert actual.summary.births.tolist() == [2]
+    assert actual.last_interval.candidate_work_deferred.tolist() == [False]
+    assert actual.last_interval.candidate_slots_evaluated.tolist() == [3]
+    assert actual.last_interval.candidate_replay_required.tolist() == [False]
+    assert actual.last_interval.matter.books_closed.tolist() == [True]
+
+
+def test_session_defers_zero_request_candidate_work_without_replay() -> None:
+    state, inputs, config = _fixture()
+    inputs = replace(inputs, birth_requested=torch.zeros_like(inputs.birth_requested))
+    expected = advance_living_interval(state, inputs, config)
+    session = RuntimeSession(
+        state,
+        config,
+        compile_motion=False,
+        compile_domains=True,
+        compile_backend="eager",
+    )
+
+    actual = session.advance_chunk(inputs, intervals=1)
+
+    assert torch.equal(
+        actual.state.population.reserve_q,
+        expected.state.population.reserve_q,
+    )
+    assert torch.equal(actual.state.genotype.node_mask, expected.state.genotype.node_mask)
+    assert actual.last_interval.candidate_work_deferred.tolist() == [True]
+    assert actual.last_interval.candidate_slots_evaluated.tolist() == [0]
+    assert actual.last_interval.candidate_replay_required.tolist() == [False]
+    assert actual.last_interval.matter.books_closed.tolist() == [True]
+
+
+def test_feeding_retry_uses_dense_candidates_for_a_new_late_request() -> None:
+    state, inputs, config = _fixture()
+    economy = state.economy.clone()
+    transferred_q = state.population.reserve_q.sum(dtype=torch.int64)
+    economy.nd_q[0, 0, 0, 0] += transferred_q
+    population = replace(
+        state.population,
+        reserve_q=torch.zeros_like(state.population.reserve_q),
+    )
+    state = replace(state, population=population, economy=economy)
+    config = replace(
+        config,
+        metabolism=replace(config.metabolism, maintenance_w_per_kg=6.0),
+    )
+    validate_living_state(state, config.economy)
+    session = RuntimeSession(
+        state,
+        config,
+        compile_motion=False,
+        compile_domains=True,
+        optimistic_motion=False,
+        compile_backend="eager",
+    )
+    feeding = session._kernels.feeding
+    fast_candidates = session._kernels.candidates
+    dense_candidates = session._robust_kernels.candidates
+    candidate_modes: list[str] = []
+
+    def controlled_feeding(*args):
+        population_before = args[0]
+        producer_before = args[1]
+        dissolved_before = args[2]
+        velocity = torch.ones_like(args[4])
+        feeding_config = args[-1]
+        step = feeding(*args[:4], velocity, *args[5:])
+        if feeding_config.allocation_rounds > 1:
+            return step
+        slot_zeros = torch.zeros_like(step.ledger.actual_debit_q)
+        cell_zeros = torch.zeros_like(step.ledger.producer_debit_by_cell_q)
+        ledger = replace(
+            step.ledger,
+            actual_debit_q=slot_zeros,
+            reserve_credit_q=slot_zeros,
+            dissolved_return_q=slot_zeros,
+            producer_debit_by_cell_q=cell_zeros,
+            dissolved_credit_by_cell_q=cell_zeros,
+            producer_chemical_input_j=torch.zeros_like(
+                step.ledger.producer_chemical_input_j
+            ),
+            reserve_chemical_credit_j=torch.zeros_like(
+                step.ledger.reserve_chemical_credit_j
+            ),
+            assimilation_heat_j=torch.zeros_like(
+                step.ledger.assimilation_heat_j
+            ),
+            allocation_rounds_exhausted=population_before.alive,
+            transaction_committed=torch.zeros_like(
+                step.ledger.transaction_committed
+            ),
+            invalid=torch.ones_like(step.ledger.invalid),
+        )
+        return replace(
+            step,
+            population=population_before,
+            producer_q=producer_before,
+            dissolved_q=dissolved_before,
+            ledger=ledger,
+        )
+
+    def counted_candidates(label, function):
+        def invoke(*args, **kwargs):
+            candidate_modes.append(label)
+            return function(*args, **kwargs)
+
+        return invoke
+
+    session._kernels = replace(
+        session._kernels,
+        feeding=controlled_feeding,
+        candidates=counted_candidates("deferred", fast_candidates),
+    )
+    session._robust_kernels = replace(
+        session._robust_kernels,
+        feeding=controlled_feeding,
+        candidates=counted_candidates("dense", dense_candidates),
+    )
+
+    def late_request_provider(candidate):
+        birth_requested = candidate.population.alive & (
+            candidate.economy.step > 0
+        )
+        return candidate, replace(inputs, birth_requested=birth_requested), None
+
+    actual = session._advance_with_provider(late_request_provider, intervals=2)
+
+    assert candidate_modes == ["deferred", "deferred", "dense", "dense"]
+    assert actual.invalid.tolist() == [False]
+    assert actual.last_interval.candidate_work_deferred.tolist() == [False]
+    assert actual.last_interval.candidate_replay_required.tolist() == [False]
+    assert actual.last_interval.matter.books_closed.tolist() == [True]
+
+
 def test_complete_interval_closes_matter_and_commits_a_mutated_paid_birth() -> None:
     state, inputs, config = _fixture()
     original_fields = tuple(value.clone() for value in state.economy.reservoirs)
@@ -129,6 +285,9 @@ def test_complete_interval_closes_matter_and_commits_a_mutated_paid_birth() -> N
     assert step.ledger.organisms.lifecycle.ledger.accepted_births.tolist() == [1]
     assert step.ledger.organisms.lifecycle.ledger.born.sum().item() == 1
     assert step.ledger.mutation.ledger.mutated.sum().item() == 1
+    assert step.ledger.candidate_work_deferred.tolist() == [False]
+    assert step.ledger.candidate_slots_evaluated.tolist() == [3]
+    assert step.ledger.candidate_replay_required.tolist() == [False]
     assert step.state.population.alive.sum().item() == 2
     assert torch.equal(step.state.body.alive, step.state.population.alive)
     assert torch.equal(step.state.body.stable_id, step.state.population.stable_id)
@@ -231,6 +390,9 @@ def test_compiled_cuda_interval_commits_paid_birth_with_exact_books() -> None:
     assert lifecycle.accepted_births.tolist() == [1]
     assert lifecycle.born.sum().item() == 1
     assert chunk.last_interval.mutation.ledger.mutated.sum().item() == 1
+    assert chunk.last_interval.candidate_work_deferred.tolist() == [False]
+    assert chunk.last_interval.candidate_slots_evaluated.tolist() == [3]
+    assert chunk.last_interval.candidate_replay_required.tolist() == [False]
     assert chunk.last_interval.matter.books_closed.tolist() == [True]
     assert chunk.last_interval.invalid.tolist() == [False]
     assert torch.equal(chunk.state.body.alive, chunk.state.population.alive)
@@ -347,6 +509,27 @@ def test_autonomous_session_composes_behavior_and_paid_birth() -> None:
         expected.state.population.reserve_q,
     )
     assert actual.last_interval.matter.books_closed.tolist() == [True]
+    assert actual.last_interval.candidate_work_deferred.tolist() == [False]
+    assert actual.last_interval.candidate_slots_evaluated.tolist() == [3]
+    assert actual.last_interval.candidate_replay_required.tolist() == [False]
+
+
+@pytest.mark.parametrize(
+    "optimistic_candidates",
+    [0, 1, 1.0, "yes", None],
+)
+def test_session_rejects_nonboolean_optimistic_candidates(
+    optimistic_candidates: object,
+) -> None:
+    state, _, config = _fixture()
+
+    with pytest.raises(TypeError, match="optimistic candidates"):
+        RuntimeSession(
+            state,
+            config,
+            compile_motion=False,
+            optimistic_candidates=optimistic_candidates,  # type: ignore[arg-type]
+        )
 
 
 def test_autonomous_prewarm_does_not_advance_authoritative_state() -> None:

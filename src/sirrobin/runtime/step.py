@@ -9,8 +9,10 @@ import torch
 
 from sirrobin.economy.step import EconomyAdvance, advance_economy_unchecked
 from sirrobin.genetics.develop import develop_unchecked
+from sirrobin.genetics.genotype import GenotypeBatch
 from sirrobin.organisms.body_cache import commit_developed_births
 from sirrobin.organisms.development import (
+    DevelopmentConfig,
     DevelopmentState,
     settle_development_lifecycle,
     target_structure_cost_q,
@@ -21,8 +23,10 @@ from sirrobin.organisms.metabolism import (
     available_actuator_work_j,
 )
 from sirrobin.organisms.mutation import (
+    MutationConfig,
     MutationStep,
     commit_offspring_mutations,
+    empty_mutation_step,
     propose_offspring_mutations,
 )
 from sirrobin.physics.contracts import DevelopedBody, FluidSample
@@ -81,6 +85,9 @@ class LivingIntervalLedger:
     organisms: OrganismIntervalStep
     returns: ReturnDeposit
     mutation: MutationStep
+    candidate_work_deferred: torch.Tensor
+    candidate_slots_evaluated: torch.Tensor
+    candidate_replay_required: torch.Tensor
     matter: RuntimeMatterLedger
     energy: LivingEnergyLedger
     motion_funding_unresolved: torch.Tensor
@@ -95,15 +102,121 @@ class LivingIntervalAdvance:
 
 
 @dataclass(frozen=True, slots=True)
+class BirthCandidateStep:
+    """Parent-indexed mutation, development, and exact structural price."""
+
+    mutation: MutationStep
+    body: DevelopedBody
+    structure_q: torch.Tensor
+    truncated: torch.Tensor
+    deferred: torch.Tensor
+    evaluated_slots: torch.Tensor
+    replay_required: torch.Tensor
+
+
+def prepare_birth_candidates_with_kernels(
+    genotype: GenotypeBatch,
+    body: DevelopedBody,
+    requested_birth: torch.Tensor,
+    event_index: torch.Tensor,
+    mutation_config: MutationConfig,
+    development_config: DevelopmentConfig,
+    *,
+    mutation_kernel: Callable[..., MutationStep],
+    development_kernel: Callable[[GenotypeBatch], DevelopedBody],
+    structure_cost_kernel: Callable[..., torch.Tensor],
+) -> BirthCandidateStep:
+    """Evaluate every parent slot through explicit domain-kernel boundaries."""
+
+    proposal = mutation_kernel(
+        genotype,
+        body,
+        requested_birth,
+        event_index,
+        mutation_config,
+    )
+    candidate_body = development_kernel(proposal.genotype)
+    candidate_structure_q = structure_cost_kernel(
+        candidate_body,
+        development_config,
+    )
+    worlds, capacity = requested_birth.shape
+    return BirthCandidateStep(
+        proposal,
+        candidate_body,
+        candidate_structure_q,
+        candidate_body.truncated_candidate_count > 0,
+        torch.zeros(worlds, dtype=torch.bool, device=requested_birth.device),
+        torch.full(
+            (worlds,),
+            capacity,
+            dtype=torch.int64,
+            device=requested_birth.device,
+        ),
+        torch.zeros(worlds, dtype=torch.bool, device=requested_birth.device),
+    )
+
+
+def prepare_dense_birth_candidates(
+    genotype: GenotypeBatch,
+    body: DevelopedBody,
+    requested_birth: torch.Tensor,
+    event_index: torch.Tensor,
+    mutation_config: MutationConfig,
+    development_config: DevelopmentConfig,
+) -> BirthCandidateStep:
+    """Evaluate every parent slot as the exact reference candidate path."""
+
+    return prepare_birth_candidates_with_kernels(
+        genotype,
+        body,
+        requested_birth,
+        event_index,
+        mutation_config,
+        development_config,
+        mutation_kernel=propose_offspring_mutations,
+        development_kernel=develop_unchecked,
+        structure_cost_kernel=target_structure_cost_q,
+    )
+
+
+def defer_birth_candidates(
+    genotype: GenotypeBatch,
+    body: DevelopedBody,
+    requested_birth: torch.Tensor,
+    event_index: torch.Tensor,
+    mutation_config: MutationConfig,
+    development_config: DevelopmentConfig,
+) -> BirthCandidateStep:
+    """Skip candidate work and flag every live request for exact chunk replay."""
+
+    del event_index, development_config
+    worlds = requested_birth.shape[0]
+    device = requested_birth.device
+    replay_required = requested_birth & genotype.alive
+    mutation = empty_mutation_step(
+        genotype,
+        mutation_config.max_mutations_per_birth,
+    )
+    return BirthCandidateStep(
+        mutation,
+        body,
+        torch.zeros_like(requested_birth, dtype=torch.int64),
+        replay_required,
+        torch.ones(worlds, dtype=torch.bool, device=device),
+        torch.zeros(worlds, dtype=torch.int64, device=device),
+        replay_required.any(dim=1),
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class LivingKernels:
     motion: Callable[..., AffordableMotionAdvance]
     economy: Callable[..., EconomyAdvance]
     feeding: Callable[..., FeedingStep]
     organisms: Callable[..., OrganismIntervalStep]
     returns: Callable[..., ReturnDeposit]
-    mutation: Callable[..., MutationStep]
-    develop_candidates: Callable[..., DevelopedBody]
-    structure_cost: Callable[..., torch.Tensor]
+    candidates: Callable[..., BirthCandidateStep]
     commit_mutation: Callable[..., MutationStep]
     body_cache: Callable[..., DevelopedBody]
     development: Callable[..., DevelopmentState]
@@ -115,9 +228,7 @@ EAGER_LIVING_KERNELS = LivingKernels(
     feeding=feed_population,
     organisms=advance_organism_interval,
     returns=deposit_organism_returns,
-    mutation=propose_offspring_mutations,
-    develop_candidates=develop_unchecked,
-    structure_cost=target_structure_cost_q,
+    candidates=prepare_dense_birth_candidates,
     commit_mutation=commit_offspring_mutations,
     body_cache=commit_developed_births,
     development=settle_development_lifecycle,
@@ -237,19 +348,18 @@ def advance_living_interval_with_kernels(
         bp_q=feeding.producer_q,
     )
     birth_requested = inputs.birth_requested & feeding.population.alive
-    proposal = kernels.mutation(
+    candidates = kernels.candidates(
         state.genotype,
         state.body,
         birth_requested,
         economy.state.step,
         config.mutation,
-    )
-    candidate_body = kernels.develop_candidates(proposal.genotype)
-    candidate_structure_q = kernels.structure_cost(
-        candidate_body,
         config.development,
     )
-    candidate_truncated = candidate_body.truncated_candidate_count > 0
+    proposal = candidates.mutation
+    candidate_body = candidates.body
+    candidate_structure_q = candidates.structure_q
+    candidate_truncated = candidates.truncated
     worlds = state.population.alive.shape[0]
     organism_inputs = OrganismIntervalInputs(
         metabolism=MetabolismInputs(
@@ -369,6 +479,9 @@ def advance_living_interval_with_kernels(
             organisms,
             returns,
             mutation,
+            candidates.deferred,
+            candidates.evaluated_slots,
+            candidates.replay_required,
             matter,
             energy,
             motion_funding_unresolved,
