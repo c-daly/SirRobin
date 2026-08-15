@@ -49,3 +49,7 @@ TestResults/
 *~
 .DS_Store
 Thumbs.db
+
+# Local assistant and code-index state
+.context/
+.serena/
