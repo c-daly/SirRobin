@@ -1,8 +1,9 @@
-"""Run the existing composed SirRobin world without Unity.
+"""Run the cohesive SirRobin living runtime without Unity.
 
 This deliberately emits human-readable operational output, not a persistence or
-observability schema.  Its purpose is to make the baseline world runnable and its
-current multi-rate cost visible before new biology is added.
+observability schema. The RuntimeSession path is the default; the preserved
+reference runner remains available for explicit comparison and legacy mechanism
+probes.
 """
 
 from __future__ import annotations
@@ -28,6 +29,13 @@ from sirrobin.economy.state import EconomyState
 from sirrobin.genetics.genotype import GenotypeBatch
 from sirrobin.physics.contracts import FluidSample
 from sirrobin.physics.live_config import LiveLocomotionConfig
+from sirrobin.runtime.material import total_matter_q
+from sirrobin.runtime.profile import (
+    BASELINE_RUNTIME_PROFILE,
+    living_runtime_config_from_reference,
+)
+from sirrobin.runtime.reference_adapter import living_state_from_reference
+from sirrobin.runtime.session import RuntimeSession
 
 FIXTURE = Path(__file__).resolve().parents[1] / "oracle/fixtures/live/donor_development_live.json"
 FIELD_NAMES = ("ND", "BP", "BD", "BM")
@@ -126,6 +134,60 @@ class WorldRunReport:
         return self.sim_time_s / self.advance_wall_time_s
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeWorldRunReport:
+    requested_sim_time_s: float
+    sim_time_s: float
+    intervals: int
+    compiled_domains: bool
+    population: int
+    initial_fields_q: tuple[int, int, int, int]
+    final_fields_q: tuple[int, int, int, int]
+    initial_structure_q: int
+    initial_reserve_q: int
+    final_structure_q: int
+    final_reserve_q: int
+    initial_whole_world_q: int
+    final_whole_world_q: int
+    books_closed: bool
+    births: int
+    deaths: int
+    starvation_deaths: int
+    old_age_deaths: int
+    requested_births: int
+    unfunded_birth_rejections: int
+    capacity_birth_rejections: int
+    mutated_births: int
+    mutation_events: int
+    behavior_seeking_intervals: int
+    behavior_searching_intervals: int
+    behavior_cruising_intervals: int
+    behavior_idle_intervals: int
+    feeding_requested_q: int
+    feeding_actual_debit_q: int
+    feeding_reserve_credit_q: int
+    dissipation_j: float
+    light_input_j: float
+    gait_time_min_s: float
+    gait_time_max_s: float
+    positions_sample_enu_m: tuple[tuple[float, float, float], ...]
+    setup_wall_time_s: float
+    warmup_wall_time_s: float
+    advance_wall_time_s: float
+
+    @property
+    def total_wall_time_s(self) -> float:
+        return (
+            self.setup_wall_time_s
+            + self.warmup_wall_time_s
+            + self.advance_wall_time_s
+        )
+
+    @property
+    def sim_seconds_per_wall_second(self) -> float:
+        return self.sim_time_s / self.advance_wall_time_s
+
+
 def _field_totals_q(state: EconomyState) -> tuple[int, int, int, int]:
     return tuple(int(reservoir.sum(dtype=torch.int64).item()) for reservoir in state.reservoirs)
 
@@ -201,6 +263,172 @@ def _build_fixture_world(
             if material_energy_config is None
             else material_energy_config
         ),
+    )
+
+
+def _tensor_int(value: torch.Tensor) -> int:
+    return int(value.sum(dtype=torch.int64).detach().cpu())
+
+
+def _tensor_float(value: torch.Tensor) -> float:
+    return float(value.sum(dtype=torch.float64).detach().cpu())
+
+
+@torch.inference_mode()
+def run_runtime_world(
+    *,
+    seconds: float,
+    bodies: int,
+    device_name: str,
+    economy_interval_s: float = 0.1,
+    compile_domains: bool = False,
+) -> RuntimeWorldRunReport:
+    """Advance the autonomous cohesive runtime and return bounded host evidence."""
+
+    if not math.isfinite(seconds) or seconds <= 0.0:
+        raise ValueError("seconds must be positive and finite")
+    if bodies <= 0:
+        raise ValueError("bodies must be positive")
+    if not math.isfinite(economy_interval_s) or economy_interval_s <= 0.0:
+        raise ValueError("economy_interval_s must be positive and finite")
+    if not isinstance(compile_domains, bool):
+        raise TypeError("compile_domains must be bool")
+    intervals = round(seconds / economy_interval_s)
+    if not math.isclose(
+        seconds,
+        intervals * economy_interval_s,
+        rel_tol=1.0e-12,
+        abs_tol=1.0e-12,
+    ):
+        raise ValueError(
+            "seconds must be an exact multiple of the fixture interval "
+            f"{economy_interval_s:g}"
+        )
+    try:
+        device = torch.device(device_name)
+    except RuntimeError as error:
+        raise ValueError(f"invalid device {device_name!r}") from error
+    if device.type not in ("cpu", "cuda"):
+        raise ValueError("device must be cpu or cuda")
+    if device.type == "cuda" and not torch.cuda.is_available():
+        raise ValueError("CUDA was requested but is not available")
+
+    setup_started = time.perf_counter()
+    world = _build_fixture_world(
+        bodies=bodies,
+        device=device,
+        economy_interval_s=economy_interval_s,
+        material_energy_config=LIVING_MATERIAL_ENERGY_CONFIG,
+        reserve_q_per_creature=5_000,
+        physics_dtype=torch.float32,
+    )
+    state = living_state_from_reference(world)
+    config = living_runtime_config_from_reference(
+        world,
+        state,
+        profile=BASELINE_RUNTIME_PROFILE,
+    )
+    session = RuntimeSession(
+        state,
+        config,
+        compile_motion=compile_domains,
+        compile_domains=compile_domains,
+        # The live funding census rejected requested-only motion on almost every
+        # interval, so the operational runtime enters the exact solver directly.
+        optimistic_motion=False,
+    )
+    initial_fields_q = _field_totals_q(state.economy)
+    initial_structure_q = _tensor_int(state.population.structure_q)
+    initial_reserve_q = _tensor_int(state.population.reserve_q)
+    initial_whole_world_q = _tensor_int(state.expected_matter_q)
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+    setup_wall_time_s = time.perf_counter() - setup_started
+
+    warmup_wall_time_s = 0.0
+    if compile_domains:
+        warmup_started = time.perf_counter()
+        session.prewarm_autonomous(world.fluid)
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        warmup_wall_time_s = time.perf_counter() - warmup_started
+
+    advance_started = time.perf_counter()
+    chunk = session.advance_autonomous_chunk(world.fluid, intervals=intervals)
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+    advance_wall_time_s = time.perf_counter() - advance_started
+    summary = chunk.summary
+    if summary is None:
+        raise RuntimeError("autonomous runtime did not return a chunk summary")
+
+    final = chunk.state
+    final_total_q = total_matter_q(final.economy, final.population)
+    books_closed = bool(
+        chunk.last_interval.economy.ledger.books_closed.all().detach().cpu()
+    ) and bool(
+        chunk.last_interval.matter.books_closed.all().detach().cpu()
+    ) and torch.equal(final_total_q, final.expected_matter_q)
+    live = final.population.alive
+    live_gait_time = final.motion.gait_time_s[live]
+    gait_time = (
+        live_gait_time
+        if live_gait_time.numel() > 0
+        else torch.tensor(
+            [float(final.economy.time_s.detach().cpu())],
+            dtype=torch.float64,
+            device=device,
+        )
+    )
+    positions = final.motion.position_enu_m[live]
+    sample = positions[: min(8, positions.shape[0])].detach().cpu().tolist()
+    return RuntimeWorldRunReport(
+        requested_sim_time_s=seconds,
+        sim_time_s=float(final.economy.time_s.detach().cpu()),
+        intervals=summary.intervals,
+        compiled_domains=compile_domains,
+        population=_tensor_int(live),
+        initial_fields_q=initial_fields_q,
+        final_fields_q=_field_totals_q(final.economy),
+        initial_structure_q=initial_structure_q,
+        initial_reserve_q=initial_reserve_q,
+        final_structure_q=_tensor_int(final.population.structure_q),
+        final_reserve_q=_tensor_int(final.population.reserve_q),
+        initial_whole_world_q=initial_whole_world_q,
+        final_whole_world_q=_tensor_int(final_total_q),
+        books_closed=books_closed,
+        births=_tensor_int(summary.births),
+        deaths=_tensor_int(summary.deaths),
+        starvation_deaths=_tensor_int(summary.starvation_deaths),
+        old_age_deaths=_tensor_int(summary.old_age_deaths),
+        requested_births=_tensor_int(summary.requested_births),
+        unfunded_birth_rejections=_tensor_int(summary.unfunded_birth_rejections),
+        capacity_birth_rejections=_tensor_int(summary.capacity_birth_rejections),
+        mutated_births=_tensor_int(summary.mutated_births),
+        mutation_events=_tensor_int(summary.mutation_events),
+        behavior_seeking_intervals=_tensor_int(
+            summary.behavior_seeking_intervals
+        ),
+        behavior_searching_intervals=_tensor_int(
+            summary.behavior_searching_intervals
+        ),
+        behavior_cruising_intervals=_tensor_int(
+            summary.behavior_cruising_intervals
+        ),
+        behavior_idle_intervals=_tensor_int(summary.behavior_idle_intervals),
+        feeding_requested_q=_tensor_int(summary.feeding_requested_q),
+        feeding_actual_debit_q=_tensor_int(summary.feeding_actual_debit_q),
+        feeding_reserve_credit_q=_tensor_int(summary.feeding_reserve_credit_q),
+        dissipation_j=_tensor_float(summary.dissipation_j),
+        light_input_j=_tensor_float(summary.light_input_j),
+        gait_time_min_s=float(gait_time.min().detach().cpu()),
+        gait_time_max_s=float(gait_time.max().detach().cpu()),
+        positions_sample_enu_m=tuple(
+            tuple(float(component) for component in row) for row in sample
+        ),
+        setup_wall_time_s=setup_wall_time_s,
+        warmup_wall_time_s=warmup_wall_time_s,
+        advance_wall_time_s=advance_wall_time_s,
     )
 
 
@@ -447,6 +675,63 @@ def _fields_line(values: tuple[int, int, int, int]) -> str:
     return " ".join(f"{name}={value}" for name, value in zip(FIELD_NAMES, values, strict=True))
 
 
+def format_runtime_report(report: RuntimeWorldRunReport) -> str:
+    positions = "\n".join(
+        f"  {index}: ({east:.9g}, {north:.9g}, {up:.9g})"
+        for index, (east, north, up) in enumerate(report.positions_sample_enu_m)
+    )
+    return "\n".join(
+        (
+            "SirRobin RuntimeSession run (operational output; not a stable schema)",
+            "runtime: cohesive device state and domain kernels",
+            f"compiled domains: {'yes' if report.compiled_domains else 'no'}",
+            f"requested simulated time s: {report.requested_sim_time_s:g}",
+            f"actual simulated time s: {report.sim_time_s:g}",
+            f"authoritative intervals: {report.intervals}",
+            f"population: {report.population}",
+            f"initial field totals q: {_fields_line(report.initial_fields_q)}",
+            f"final field totals q: {_fields_line(report.final_fields_q)}",
+            "initial creature totals q: "
+            f"structure={report.initial_structure_q} reserve={report.initial_reserve_q}",
+            "final creature totals q: "
+            f"structure={report.final_structure_q} reserve={report.final_reserve_q}",
+            f"initial whole-world total q: {report.initial_whole_world_q}",
+            f"final whole-world total q: {report.final_whole_world_q}",
+            f"exact whole-world books closed: {'yes' if report.books_closed else 'no'}",
+            f"births: {report.births}",
+            f"deaths: {report.deaths}",
+            f"starvation deaths: {report.starvation_deaths}",
+            f"old-age deaths: {report.old_age_deaths}",
+            f"requested births: {report.requested_births}",
+            f"unfunded birth rejections: {report.unfunded_birth_rejections}",
+            f"capacity birth rejections: {report.capacity_birth_rejections}",
+            f"mutated births: {report.mutated_births}",
+            f"mutation events: {report.mutation_events}",
+            "behavior intervals: "
+            f"seeking={report.behavior_seeking_intervals} "
+            f"searching={report.behavior_searching_intervals} "
+            f"cruising={report.behavior_cruising_intervals} "
+            f"idle={report.behavior_idle_intervals}",
+            f"feeding requested q: {report.feeding_requested_q}",
+            f"feeding actual debit q: {report.feeding_actual_debit_q}",
+            f"feeding reserve credit q: {report.feeding_reserve_credit_q}",
+            f"interval dissipation J: {report.dissipation_j:.9g}",
+            f"interval light input J: {report.light_input_j:.9g}",
+            "mechanics clock range s: "
+            f"{report.gait_time_min_s:g} .. {report.gait_time_max_s:g}",
+            "positions sample ENU m "
+            f"({len(report.positions_sample_enu_m)}/{report.population}):",
+            positions,
+            f"setup wall time s: {report.setup_wall_time_s:.6f}",
+            f"warmup wall time s: {report.warmup_wall_time_s:.6f}",
+            f"advance wall time s: {report.advance_wall_time_s:.6f}",
+            f"total wall time s: {report.total_wall_time_s:.6f}",
+            "simulated seconds / wall second: "
+            f"{report.sim_seconds_per_wall_second:.6f} (advance only)",
+        )
+    )
+
+
 def format_report(report: WorldRunReport) -> str:
     positions = "\n".join(
         f"  {index}: ({east:.9g}, {north:.9g}, {up:.9g})"
@@ -539,10 +824,22 @@ def format_report(report: WorldRunReport) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--runtime",
+        choices=("device", "reference"),
+        default="device",
+        help="device uses RuntimeSession; reference preserves the old runner",
+    )
     parser.add_argument("--seconds", type=float, default=0.1)
     parser.add_argument("--bodies", type=int, default=2)
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument("--economy-interval", type=float, default=0.1)
+    parser.add_argument(
+        "--compile",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="compile RuntimeSession domains (defaults on for CUDA and off for CPU)",
+    )
     parser.add_argument(
         "--feed-one",
         action="store_true",
@@ -559,19 +856,46 @@ def main(argv: list[str] | None = None) -> int:
         help="attempt one paid exact-clone birth after the requested run",
     )
     arguments = parser.parse_args(argv)
-    try:
-        report = run_world(
-            seconds=arguments.seconds,
-            bodies=arguments.bodies,
-            device_name=arguments.device,
-            economy_interval_s=arguments.economy_interval,
-            feed_one=arguments.feed_one,
-            maintain_one=arguments.maintain_one,
-            birth_one=arguments.birth_one,
+    legacy_probe_requested = (
+        arguments.feed_one or arguments.maintain_one or arguments.birth_one
+    )
+    if arguments.runtime == "device" and legacy_probe_requested:
+        parser.error(
+            "--feed-one, --maintain-one, and --birth-one require --runtime reference"
         )
+    if arguments.runtime == "reference" and arguments.compile is not None:
+        parser.error("--compile/--no-compile applies only to --runtime device")
+    try:
+        if arguments.runtime == "device":
+            compile_domains = (
+                arguments.device == "cuda"
+                if arguments.compile is None
+                else arguments.compile
+            )
+            runtime_report = run_runtime_world(
+                seconds=arguments.seconds,
+                bodies=arguments.bodies,
+                device_name=arguments.device,
+                economy_interval_s=arguments.economy_interval,
+                compile_domains=compile_domains,
+            )
+        else:
+            reference_report = run_world(
+                seconds=arguments.seconds,
+                bodies=arguments.bodies,
+                device_name=arguments.device,
+                economy_interval_s=arguments.economy_interval,
+                feed_one=arguments.feed_one,
+                maintain_one=arguments.maintain_one,
+                birth_one=arguments.birth_one,
+            )
     except ValueError as error:
         parser.error(str(error))
-    print(format_report(report))
+    print(
+        format_runtime_report(runtime_report)
+        if arguments.runtime == "device"
+        else format_report(reference_report)
+    )
     return 0
 
 
