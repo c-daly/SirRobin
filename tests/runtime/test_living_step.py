@@ -23,6 +23,7 @@ from sirrobin.runtime.config import (
     validate_living_runtime_config,
 )
 from sirrobin.runtime.material import total_matter_q
+from sirrobin.runtime.motion_state import developed_support_radius_m
 from sirrobin.runtime.session import RuntimeSession
 from sirrobin.runtime.state import LivingState, validate_living_state
 from sirrobin.runtime.step import (
@@ -275,7 +276,6 @@ def test_feeding_retry_uses_dense_candidates_for_a_new_late_request() -> None:
 
 def test_complete_interval_closes_matter_and_commits_a_mutated_paid_birth() -> None:
     state, inputs, config = _fixture()
-    original_fields = tuple(value.clone() for value in state.economy.reservoirs)
 
     step = advance_living_interval(state, inputs, config)
 
@@ -297,21 +297,102 @@ def test_complete_interval_closes_matter_and_commits_a_mutated_paid_birth() -> N
         step.state.body,
     )
     born = step.ledger.organisms.lifecycle.ledger.born
+    accepted_parent = step.ledger.organisms.lifecycle.ledger.accepted_parent
+    child_slot = int(born[0].nonzero()[0])
+    parent_slot = int(accepted_parent[0].nonzero()[0])
     assert torch.count_nonzero(step.state.motion.gait_time_s[born]) == 0
-    assert torch.count_nonzero(
-        step.state.motion.velocity_rel_water_enu_m_s[born]
-    ) == 0
+    assert torch.count_nonzero(step.state.motion.velocity_rel_water_enu_m_s[born]) > 0
+    assert not torch.equal(
+        step.state.motion.position_enu_m[born],
+        step.state.motion.position_enu_m[accepted_parent],
+    )
+    periods = step.state.motion.position_enu_m.new_tensor(
+        [config.geometry.lx_m, config.geometry.ly_m]
+    )
+    displacement_xy = (
+        step.state.motion.position_enu_m[0, child_slot, :2]
+        - step.state.motion.position_enu_m[0, parent_slot, :2]
+    )
+    minimum_image_xy = torch.remainder(
+        displacement_xy + 0.5 * periods,
+        periods,
+    ) - 0.5 * periods
+    support_radius = developed_support_radius_m(step.state.body)
+    required_separation = (
+        support_radius[0, parent_slot]
+        + support_radius[0, child_slot]
+        + config.birth_separation_clearance_m
+    )
+    assert torch.linalg.vector_norm(minimum_image_xy) >= required_separation
+    assert torch.allclose(
+        step.ledger.release.parent_impulse_enu_ns.sum(dim=1)
+        + step.ledger.release.child_impulse_enu_ns.sum(dim=1),
+        torch.zeros((1, 3)),
+    )
+    release_q = (
+        step.ledger.organisms.lifecycle.ledger.birth_release_energy_return_q
+    )
+    assert release_q.sum() > 0
+    assert step.ledger.energy.birth_release_chemical_input_j.sum().item() == (
+        release_q.sum().item() * config.metabolism.reserve_j_per_q
+    )
+    assert torch.allclose(
+        step.ledger.energy.birth_release_heat_j,
+        step.ledger.energy.birth_release_chemical_input_j
+        - step.ledger.energy.birth_release_kinetic_delta_j,
+    )
+    assert bool((step.ledger.energy.birth_release_heat_j >= 0.0).all())
     assert step.ledger.energy.birth_construction_heat_j.sum().item() == (
         step.ledger.organisms.lifecycle.ledger.birth_structure_transfer_q.sum().item()
         * config.metabolism.reserve_j_per_q
     )
-    assert all(
-        torch.equal(current, original)
-        for current, original in zip(
-            state.economy.reservoirs, original_fields, strict=True
-        )
+    assert not bool(step.state.motion.heading_initialized[born].any())
+    assert not bool(step.state.motion.desired_heading_enu[born].any())
+    first_child_intent = request_living_intent(
+        step.state.population,
+        step.state.body,
+        step.state.motion,
+        step.state.economy.bp_q,
+        config.geometry,
+        config.live,
+        config.behavior,
+        q_mass_mol=config.economy.q_mass_mol,
     )
+    assert first_child_intent.sampled_producer_mol_m3[born] > 0.0
+    assert bool(first_child_intent.locomoting[born].all())
     validate_living_state(step.state, config.economy)
+
+
+def test_impossible_birth_release_blocks_only_the_birth() -> None:
+    state, inputs, config = _fixture()
+    config = replace(
+        config,
+        birth_separation_clearance_m=min(
+            config.geometry.lx_m,
+            config.geometry.ly_m,
+        ),
+    )
+
+    session = RuntimeSession(
+        state,
+        config,
+        compile_motion=False,
+        compile_domains=False,
+        optimistic_motion=False,
+        optimistic_feeding=False,
+        optimistic_candidates=False,
+    )
+
+    chunk = session.advance_chunk(inputs, intervals=1)
+
+    lifecycle = chunk.last_interval.organisms.lifecycle.ledger
+    assert lifecycle.accepted_births.tolist() == [0]
+    assert not bool(lifecycle.born.any())
+    assert chunk.state.population.alive.sum().item() == 1
+    assert chunk.state.economy.step.item() == state.economy.step.item() + 1
+    assert chunk.last_interval.matter.books_closed.tolist() == [True]
+    assert chunk.invalid.tolist() == [False]
+    validate_living_state(chunk.state, config.economy)
 
 
 def test_morphology_birth_is_developed_and_paid_before_commit() -> None:
@@ -399,9 +480,7 @@ def test_compiled_cuda_interval_commits_paid_birth_with_exact_books() -> None:
     assert torch.equal(chunk.state.body.stable_id, chunk.state.population.stable_id)
     born = lifecycle.born
     assert torch.count_nonzero(chunk.state.motion.gait_time_s[born]) == 0
-    assert torch.count_nonzero(
-        chunk.state.motion.velocity_rel_water_enu_m_s[born]
-    ) == 0
+    assert torch.count_nonzero(chunk.state.motion.velocity_rel_water_enu_m_s[born]) > 0
     validate_living_state(chunk.state, config.economy)
 
 

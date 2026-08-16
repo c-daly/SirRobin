@@ -30,6 +30,8 @@ class LivingRuntimeConfig:
     mutation: MutationConfig
     development: DevelopmentConfig
     child_initial_reserve_q: int
+    birth_release_impulse_ns: float = 1.0
+    birth_separation_clearance_m: float = 1.0e-4
 
     @property
     def geometry(self) -> GridGeometry:
@@ -73,3 +75,11 @@ def validate_living_runtime_config(config: LivingRuntimeConfig) -> None:
         raise TypeError("child initial reserve must be an integer")
     if not 0 <= config.child_initial_reserve_q < INT64_SAFE_MAX:
         raise ValueError("child initial reserve exceeds the exact-integer domain")
+    for label, value in (
+        ("birth release impulse", config.birth_release_impulse_ns),
+        ("birth separation clearance", config.birth_separation_clearance_m),
+    ):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError(f"{label} must be a real number")
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"{label} must be finite and positive")

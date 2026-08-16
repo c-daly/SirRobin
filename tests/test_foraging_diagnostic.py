@@ -5,7 +5,7 @@ from __future__ import annotations
 from tools.diagnose_foraging import INTERPRETATION, run_foraging_diagnostic
 
 
-def test_foraging_diagnostic_is_deterministic_and_accounts_for_every_live_mode() -> None:
+def test_foraging_diagnostic_is_deterministic_and_accounts_for_live_intent() -> None:
     arguments = {
         "device_name": "cpu",
         "duration_s": 0.2,
@@ -22,8 +22,14 @@ def test_foraging_diagnostic_is_deterministic_and_accounts_for_every_live_mode()
     assert "failed" not in first
     assert first["configuration"]["intervals"] == 2
     assert first["conservation"]["books_closed"] is True
-    assert sum(first["aggregate"]["mode_intervals"].values()) == first["aggregate"]["behavior_intervals"]
+    producer = first["producer_accounting"]
+    assert producer["balance_closed"] is True
+    assert producer["final_q"] == producer["expected_final_q"]
+    assert producer["feeding_debit_q"] == first["aggregate"]["feeding_debit_q"]
+    assert first["aggregate"]["locomoting_intervals"] == first["aggregate"]["behavior_intervals"]
+    assert first["aggregate"]["food_gradient_intervals"] <= first["aggregate"]["behavior_intervals"]
     assert first["aggregate"]["behavior_intervals"] == 2 * first["configuration"]["initial_bodies"]
     for creature in first["creatures"]:
-        assert sum(creature["mode_intervals"].values()) == creature["behavior_intervals"]
+        assert creature["locomoting_intervals"] == creature["behavior_intervals"]
+        assert creature["food_gradient_intervals"] <= creature["behavior_intervals"]
         assert creature["path_length_m"] >= creature["displacement_m"]

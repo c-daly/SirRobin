@@ -46,12 +46,18 @@ def _request(
     birth: list[bool],
     child_structure_q: list[int],
     child_reserve_q: list[int],
+    birth_release_energy_q: list[int] | None = None,
 ) -> LifecycleRequest:
+    if birth_release_energy_q is None:
+        birth_release_energy_q = [0] * len(death)
     request = LifecycleRequest(
         death=torch.tensor([death], dtype=torch.bool),
         birth=torch.tensor([birth], dtype=torch.bool),
         child_structure_q=torch.tensor([child_structure_q], dtype=torch.int64),
         child_reserve_q=torch.tensor([child_reserve_q], dtype=torch.int64),
+        birth_release_energy_q=torch.tensor(
+            [birth_release_energy_q], dtype=torch.int64
+        ),
         time_s=torch.tensor([4.5], dtype=torch.float64),
     )
     validate_lifecycle_request(state, request)
@@ -95,6 +101,64 @@ def test_death_slot_is_reused_by_paid_birth_without_changing_total_matter() -> N
     )
     assert torch.equal(before_q, after_q + returned_q)
     validate_population_state(step.state)
+
+
+def test_birth_release_energy_is_paid_and_returned_as_material() -> None:
+    state = _state(
+        alive=[True, False],
+        stable_id=[1, 0],
+        structure_q=[2, 0],
+        reserve_q=[10, 0],
+        next_stable_id=2,
+    )
+
+    step = settle_lifecycle(
+        state,
+        _request(
+            state,
+            death=[False, False],
+            birth=[True, False],
+            child_structure_q=[5, 0],
+            child_reserve_q=[2, 0],
+            birth_release_energy_q=[1, 0],
+        ),
+    )
+
+    assert step.ledger.accepted_births.tolist() == [1]
+    assert step.state.reserve_q.tolist() == [[2, 2]]
+    assert step.ledger.birth_release_energy_return_q.tolist() == [[1, 0]]
+    before_q = state.structure_q.sum() + state.reserve_q.sum()
+    after_q = step.state.structure_q.sum() + step.state.reserve_q.sum()
+    assert torch.equal(
+        before_q,
+        after_q + step.ledger.birth_release_energy_return_q.sum(),
+    )
+
+
+def test_birth_waits_when_parent_cannot_pay_release_energy() -> None:
+    state = _state(
+        alive=[True, False],
+        stable_id=[1, 0],
+        structure_q=[2, 0],
+        reserve_q=[8, 0],
+        next_stable_id=2,
+    )
+
+    step = settle_lifecycle(
+        state,
+        _request(
+            state,
+            death=[False, False],
+            birth=[True, False],
+            child_structure_q=[5, 0],
+            child_reserve_q=[2, 0],
+            birth_release_energy_q=[2, 0],
+        ),
+    )
+
+    assert step.ledger.accepted_births.tolist() == [0]
+    assert step.ledger.unfunded_rejections.tolist() == [1]
+    assert torch.equal(step.state.reserve_q, state.reserve_q)
 
 
 def test_birth_assignment_orders_parents_by_identity_and_destinations_by_slot() -> None:
@@ -240,6 +304,7 @@ def test_randomized_batched_lifecycle_preserves_exact_creature_census() -> None:
         birth=alive & (torch.rand((worlds, capacity), generator=generator) < 0.4),
         child_structure_q=structure,
         child_reserve_q=torch.where(alive, 7, 0),
+        birth_release_energy_q=torch.zeros_like(structure),
         time_s=torch.full((worlds,), 12.5, dtype=torch.float64),
     )
     validate_population_state(state)

@@ -78,6 +78,16 @@ def test_old_age_due_uses_birth_time_and_never_marks_inactive_slots() -> None:
     assert due.tolist() == [[True, False, False], [False, False, False]]
 
 
+def test_disabled_age_mortality_never_invents_a_death_clock() -> None:
+    state = _state()
+    config = MortalityConfig(60.0, 100.0, seed=20260811, enabled=False)
+    config.validate()
+
+    due = old_age_due(state, torch.tensor([1.0e12, 1.0e12]), config)
+
+    assert not bool(due.any())
+
+
 def test_mortality_census_is_one_full_compiled_graph() -> None:
     state = _state()
     config = MortalityConfig(60.0, 100.0, seed=20260811)

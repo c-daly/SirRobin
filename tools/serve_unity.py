@@ -26,7 +26,7 @@ from tools.run_world import (
     _build_fixture_world,
 )
 from tools.runtime_unity import (
-    EVOLUTION_DEMO_RUNTIME_PROFILE,
+    CAUSAL_RUNTIME_PROFILE,
     RUNTIME_UNITY_PROFILES,
     RuntimeObservationTotals,
     RuntimeUnityBackend,
@@ -41,7 +41,16 @@ PORT = 8765
 CAPACITY = 64
 INITIAL_BODIES = 8
 LIVE_INITIAL_RESERVE_Q = 2
-LIVE_RICH_FOOD_CELL_Q = 2_000_000
+LIVE_GRID_CELL_M = 1.0
+# Preserve the prior live fixture's local producer concentration while removing
+# its three artificial top-hat patches.  The larger homogeneous producer share
+# is transferred from the existing dissolved pool, so total limiting nutrient
+# is unchanged.  These concentrations remain declared idealized initial
+# conditions, not empirical values or biological rate targets.  Spatial
+# structure after initialization must come from represented mechanisms.
+LIVE_TOTAL_N_MOL_M3 = 2.225e-5
+LIVE_PRODUCER_N_MOL_M3 = 4.0e-6
+LIVE_DETRITUS_N_MOL_M3 = 0.25e-6
 DISPLAY_BODIES = CAPACITY
 ECONOMY_INTERVAL_S = 0.1
 STREAM_EVERY_STEPS = 1
@@ -132,6 +141,7 @@ def _descriptor(
     world,
     *,
     profile: RuntimeUnityProfile | None = None,
+    time_scale: float | None = None,
 ) -> dict[str, object]:
     config = world.economy_config if hasattr(world, "economy_config") else world
     configuration: dict[str, object] = {
@@ -144,14 +154,29 @@ def _descriptor(
             "grid_layers": config.gz,
         },
         "notice": "live read-only compatibility stream; not a persistence schema",
+        "clock": {
+            "authoritative_time": "simulation_seconds",
+            "simulation_seconds_per_wall_second": time_scale,
+            "mode": "compute-limited" if time_scale is None else "paced-upper-bound",
+        },
     }
     if profile is not None:
         configuration["runtime_profile"] = {
             "name": profile.name,
             "description": profile.description,
-            "min_lifespan_s": profile.mortality.min_lifespan_s,
-            "max_lifespan_s": profile.mortality.max_lifespan_s,
+            "age_mortality_enabled": profile.mortality.enabled,
+            "min_lifespan_s": (
+                profile.mortality.min_lifespan_s
+                if profile.mortality.enabled
+                else None
+            ),
+            "max_lifespan_s": (
+                profile.mortality.max_lifespan_s
+                if profile.mortality.enabled
+                else None
+            ),
             "mutation_rate_per_locus": profile.mutation.mutation_rate_per_locus,
+            "food_state": "local_producer_value_and_horizontal_gradient",
         }
     return {
         "kind": "session",
@@ -165,6 +190,23 @@ def _descriptor(
         "relationship_types": [],
         "configuration": configuration,
     }
+
+
+def _pace_wall_clock(
+    *,
+    wall_started_s: float,
+    sim_started_s: float,
+    sim_now_s: float,
+    time_scale: float | None,
+) -> None:
+    """Pace observation in wall time without changing authoritative simulation time."""
+
+    if time_scale is None:
+        return
+    target_wall_s = wall_started_s + (sim_now_s - sim_started_s) / time_scale
+    remaining_s = target_wall_s - time.perf_counter()
+    if remaining_s > 0.0:
+        time.sleep(remaining_s)
 
 
 def _module_sets(world) -> dict[int, list[dict[str, float]]]:
@@ -213,19 +255,29 @@ def _seed_visible_baseline(world, *, seed: int = 20260809) -> None:
 
 
 def _build_server_world(*, device: torch.device | None = None):
-    """Build a spacious world without changing the fixture's local cell scale."""
+    """Build an idealized homogeneous metre-grid world with exact local stocks."""
     resolved_device = torch.device("cpu") if device is None else device
     economy = replace(
         EconomyConfig(),
-        gx=6,
-        gy=6,
-        gz=4,
+        gx=round(VIEW_WIDTH_M / LIVE_GRID_CELL_M),
+        gy=round(VIEW_HEIGHT_M / LIVE_GRID_CELL_M),
+        gz=round(VIEW_DEPTH_M / LIVE_GRID_CELL_M),
         lx_m=VIEW_WIDTH_M,
         ly_m=VIEW_HEIGHT_M,
         lz_m=VIEW_DEPTH_M,
         dt_eco_s=ECONOMY_INTERVAL_S,
         remin_floor_s=1.0e-4,
     )
+
+    def concentration_q(value_mol_m3: float) -> int:
+        return round(
+            value_mol_m3
+            * economy.cell_volume_m3
+            / economy.q_mass_mol
+        )
+
+    total_n_cell_q = concentration_q(LIVE_TOTAL_N_MOL_M3)
+    detritus_cell_q = concentration_q(LIVE_DETRITUS_N_MOL_M3)
     world = _build_fixture_world(
         bodies=CAPACITY,
         live_bodies=INITIAL_BODIES,
@@ -235,22 +287,38 @@ def _build_server_world(*, device: torch.device | None = None):
         material_energy_config=LIVING_MATERIAL_ENERGY_CONFIG,
         reserve_q_per_creature=LIVE_INITIAL_RESERVE_Q,
         physics_dtype=torch.float32,
+        initial_dissolved_q_per_cell=total_n_cell_q,
     )
-    # Retain producer only in three full-depth food patches. Availability remains
-    # a local concentration derived from stock and the declared 500 m3 cell volume;
-    # the exact surplus becomes dissolved nutrient rather than disappearing.
-    producer_total_q = int(world.economy_state.bp_q.sum().item())
-    patch_columns = ((1, 1), (3, 4), (5, 2))
-    rich_cells = len(patch_columns) * economy.gz
-    world.economy_state.bp_q.zero_()
-    for x_index, y_index in patch_columns:
-        world.economy_state.bp_q[0, x_index, y_index, :].fill_(
-            LIVE_RICH_FOOD_CELL_Q
-        )
-    producer_surplus_q = producer_total_q - rich_cells * LIVE_RICH_FOOD_CELL_Q
-    if producer_surplus_q < 0:
-        raise RuntimeError("food patches exceed the available producer inventory")
-    world.economy_state.nd_q[0, 0, 0, 0] += producer_surplus_q
+    nd_q = world.economy_state.nd_q[0]
+    cells = economy.gx * economy.gy * economy.gz
+    producer_total_q = round(
+        LIVE_PRODUCER_N_MOL_M3
+        * economy.lx_m
+        * economy.ly_m
+        * economy.lz_m
+        / economy.q_mass_mol
+    )
+    producer_base_q, producer_remainder_q = divmod(producer_total_q, cells)
+    ranks = torch.arange(cells, dtype=torch.int64, device=resolved_device)
+    # Bresenham-style apportionment spreads indivisible remainder quanta across
+    # the whole domain instead of creating an artificial hot region.
+    producer_extra_q = torch.div(
+        (ranks + 1) * producer_remainder_q,
+        cells,
+        rounding_mode="floor",
+    ) - torch.div(
+        ranks * producer_remainder_q,
+        cells,
+        rounding_mode="floor",
+    )
+    producer_q = (producer_base_q + producer_extra_q).reshape(
+        economy.gx, economy.gy, economy.gz
+    )
+    if total_n_cell_q < producer_base_q + 1 + detritus_cell_q:
+        raise RuntimeError("live biomass exceeds the declared local nutrient inventory")
+    nd_q.sub_(producer_q + detritus_cell_q)
+    world.economy_state.bp_q[0].copy_(producer_q)
+    world.economy_state.bd_q[0].fill_(detritus_cell_q)
     world.economy_state.validate(world.economy_config)
     if not torch.equal(world.matter_totals().total_q, world.expected_matter_total_q):
         raise RuntimeError("server producer pattern changed the exact matter inventory")
@@ -506,6 +574,7 @@ def _stream_reference(
     cursor: _StreamCursor,
     *,
     stream_every_steps: int = STREAM_EVERY_STEPS,
+    time_scale: float | None = None,
 ) -> str | None:
     initially_extinct = not bool(world.body.alive.any())
     initial_events = [EXTINCTION_EVENT] if initially_extinct else None
@@ -545,6 +614,12 @@ def _stream_reference(
             interval_events.append(EXTINCTION_EVENT)
         if steps_since_frame < stream_every_steps and not extinct:
             continue
+        _pace_wall_clock(
+            wall_started_s=stream_started,
+            sim_started_s=stream_sim_started,
+            sim_now_s=world.sim_time_s,
+            time_scale=time_scale,
+        )
         sequence = cursor.next()
         frames_sent += 1
         _send_record(
@@ -586,6 +661,7 @@ def _stream_runtime(
     cursor: _StreamCursor,
     *,
     stream_every_steps: int = STREAM_EVERY_STEPS,
+    time_scale: float | None = None,
 ) -> str | None:
     snapshot = backend.snapshot()
     initially_extinct = not bool(snapshot.alive.any())
@@ -637,6 +713,12 @@ def _stream_runtime(
         if steps_since_frame < stream_every_steps and not extinct:
             continue
         snapshot = backend.snapshot()
+        _pace_wall_clock(
+            wall_started_s=stream_started,
+            sim_started_s=stream_sim_started,
+            sim_now_s=snapshot.time_s,
+            time_scale=time_scale,
+        )
         sequence = cursor.next()
         frames_sent += 1
         _send_record(
@@ -697,8 +779,8 @@ def main() -> None:
         choices=tuple(RUNTIME_UNITY_PROFILES),
         default=None,
         help=(
-            "named Unity observation calibration; device defaults to "
-            "evolution-demo and reference defaults to baseline"
+            "named runtime model; device defaults to causal and reference "
+            "defaults to baseline"
         ),
     )
     parser.add_argument(
@@ -722,6 +804,15 @@ def main() -> None:
         default=STREAM_EVERY_STEPS,
         help="coalesce this many exact simulation intervals into one Unity frame",
     )
+    parser.add_argument(
+        "--time-scale",
+        type=float,
+        default=None,
+        help=(
+            "target simulated-seconds per wall-second; this paces the driver "
+            "but never changes simulation dt or any physical/biological rate"
+        ),
+    )
     args = parser.parse_args()
     if args.stream_every_steps < 1:
         parser.error("--stream-every-steps must be positive")
@@ -731,6 +822,10 @@ def main() -> None:
         args.fast_forward_seconds
     ):
         parser.error("--fast-forward-seconds must be finite and nonnegative")
+    if args.time_scale is not None and (
+        args.time_scale <= 0.0 or not math.isfinite(args.time_scale)
+    ):
+        parser.error("--time-scale must be finite and positive")
     if args.runtime == "reference" and args.fast_forward_seconds > 0.0:
         parser.error("finite fast-forward is available on the device runtime")
     if args.runtime == "reference" and args.profile not in (None, "baseline"):
@@ -740,7 +835,7 @@ def main() -> None:
         if args.runtime == "device":
             device = torch.device(args.device)
             profile = RUNTIME_UNITY_PROFILES[
-                EVOLUTION_DEMO_RUNTIME_PROFILE.name
+                CAUSAL_RUNTIME_PROFILE.name
                 if args.profile is None
                 else args.profile
             ]
@@ -870,6 +965,7 @@ def main() -> None:
                             _descriptor(
                                 descriptor_source,
                                 profile=descriptor_profile,
+                                time_scale=args.time_scale,
                             )
                         )
                     )
@@ -885,6 +981,7 @@ def main() -> None:
                             backend,
                             cursor,
                             stream_every_steps=args.stream_every_steps,
+                            time_scale=args.time_scale,
                         )
                     else:
                         assert runner is not None
@@ -894,6 +991,7 @@ def main() -> None:
                             runner,
                             cursor,
                             stream_every_steps=args.stream_every_steps,
+                            time_scale=args.time_scale,
                         )
                 except _TerminalDeliveryPending as error:
                     pending_terminal = error.pending

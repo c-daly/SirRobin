@@ -31,7 +31,7 @@ def test_run_world_defaults_to_runtime_session_and_reports_bounded_evidence() ->
     assert "runtime: cohesive device state and domain kernels" in completed.stdout
     assert "compiled domains: no" in completed.stdout
     assert "optimistic candidates: yes" in completed.stdout
-    assert "runtime profile: baseline" in completed.stdout
+    assert "runtime profile: causal" in completed.stdout
     assert "requested simulated time s: 0.2" in completed.stdout
     assert "actual simulated time s: 0.2" in completed.stdout
     assert "authoritative intervals: 2" in completed.stdout

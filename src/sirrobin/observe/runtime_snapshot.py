@@ -112,6 +112,7 @@ def _interval_energy(
                 energy.death_kinetic_and_carry_dissipation_j,
                 energy.death_reserve_dissipation_j,
                 energy.birth_construction_heat_j,
+                energy.birth_release_heat_j,
             )
         ),
         start=torch.zeros((), dtype=torch.float64, device=device),

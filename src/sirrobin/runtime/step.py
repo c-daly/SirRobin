@@ -43,7 +43,11 @@ from sirrobin.runtime.material import (
     deposit_organism_returns,
     total_matter_q,
 )
-from sirrobin.runtime.motion_state import settle_motion_lifecycle
+from sirrobin.runtime.motion_state import (
+    BirthReleaseLedger,
+    propose_birth_release,
+    settle_motion_lifecycle,
+)
 from sirrobin.runtime.organism_step import (
     OrganismIntervalInputs,
     OrganismIntervalStep,
@@ -75,6 +79,9 @@ class LivingEnergyLedger:
     death_kinetic_and_carry_dissipation_j: torch.Tensor
     death_reserve_dissipation_j: torch.Tensor
     birth_construction_heat_j: torch.Tensor
+    birth_release_chemical_input_j: torch.Tensor
+    birth_release_kinetic_delta_j: torch.Tensor
+    birth_release_heat_j: torch.Tensor
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +92,7 @@ class LivingIntervalLedger:
     organisms: OrganismIntervalStep
     returns: ReturnDeposit
     mutation: MutationStep
+    release: BirthReleaseLedger
     candidate_work_deferred: torch.Tensor
     candidate_slots_evaluated: torch.Tensor
     candidate_replay_required: torch.Tensor
@@ -240,6 +248,7 @@ def _runtime_energy_ledger(
     feeding: FeedingStep,
     organisms: OrganismIntervalStep,
     motion: AffordableMotionAdvance,
+    release: BirthReleaseLedger,
     config: LivingRuntimeConfig,
 ) -> LivingEnergyLedger:
     producer_j = config.feeding.producer_j_per_q
@@ -269,6 +278,14 @@ def _runtime_energy_ledger(
         ),
         birth_construction_heat_j=(
             lifecycle.birth_structure_transfer_q.to(torch.float64) * reserve_j
+        ),
+        birth_release_chemical_input_j=(
+            lifecycle.birth_release_energy_return_q.to(torch.float64) * reserve_j
+        ),
+        birth_release_kinetic_delta_j=release.kinetic_delta_j,
+        birth_release_heat_j=(
+            lifecycle.birth_release_energy_return_q.to(torch.float64) * reserve_j
+            - release.kinetic_delta_j
         ),
     )
 
@@ -360,6 +377,18 @@ def advance_living_interval_with_kernels(
     candidate_body = candidates.body
     candidate_structure_q = candidates.structure_q
     candidate_truncated = candidates.truncated
+    release_proposal = propose_birth_release(
+        state.body,
+        candidate_body,
+        motion.state,
+        motion.ledger.response.effective_mass_after_kg,
+        birth_requested & ~candidate_truncated,
+        config.geometry,
+        config.live,
+        impulse_ns=config.birth_release_impulse_ns,
+        clearance_m=config.birth_separation_clearance_m,
+        reserve_j_per_q=config.metabolism.reserve_j_per_q,
+    )
     worlds = state.population.alive.shape[0]
     organism_inputs = OrganismIntervalInputs(
         metabolism=MetabolismInputs(
@@ -376,12 +405,18 @@ def advance_living_interval_with_kernels(
                 motion.ledger.response.yaw_inertia_after_kg_m2
             ),
         ),
-        birth_requested=birth_requested & ~candidate_truncated,
+        # Release feasibility belongs to this candidate transaction. A failed
+        # proposal blocks the birth but does not invalidate otherwise valid
+        # field, feeding, metabolism, or motion state for the interval.
+        birth_requested=(
+            birth_requested & ~candidate_truncated & ~release_proposal.invalid
+        ),
         child_structure_q=candidate_structure_q,
         child_reserve_q=torch.full_like(
             feeding.population.reserve_q,
             config.child_initial_reserve_q,
         ),
+        birth_release_energy_q=release_proposal.release_energy_q,
         time_s=economy.state.time_s.expand(worlds),
     )
     organisms = kernels.organisms(
@@ -396,6 +431,7 @@ def advance_living_interval_with_kernels(
         metabolism_ledger.maintenance_return_q
         + lifecycle_ledger.death_structure_return_q
         + lifecycle_ledger.death_reserve_return_q
+        + lifecycle_ledger.birth_release_energy_return_q
     )
     returns = kernels.returns(
         economy_after_feeding.nd_q,
@@ -426,10 +462,11 @@ def advance_living_interval_with_kernels(
         body,
         lifecycle_ledger,
     )
-    settled_motion = settle_motion_lifecycle(
+    settled_motion, release = settle_motion_lifecycle(
         motion.state,
         organisms.state,
         lifecycle_ledger,
+        release_proposal,
     )
     next_state = LivingState(
         organisms.state,
@@ -468,6 +505,7 @@ def advance_living_interval_with_kernels(
         feeding,
         organisms,
         motion,
+        release,
         config,
     )
     return LivingIntervalAdvance(
@@ -479,6 +517,7 @@ def advance_living_interval_with_kernels(
             organisms,
             returns,
             mutation,
+            release,
             candidates.deferred,
             candidates.evaluated_slots,
             candidates.replay_required,

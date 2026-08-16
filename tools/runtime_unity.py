@@ -28,6 +28,7 @@ from sirrobin.physics.contracts import FluidSample
 from sirrobin.runtime.config import LivingRuntimeConfig
 from sirrobin.runtime.profile import (
     BASELINE_RUNTIME_PROFILE,
+    CAUSAL_RUNTIME_PROFILE,
     EVOLUTION_DEMO_RUNTIME_PROFILE,
     LIVE_BEHAVIOR_CONFIG,
     RUNTIME_PROFILES,
@@ -40,6 +41,7 @@ from sirrobin.runtime.step import LivingIntervalLedger
 
 __all__ = (
     "BASELINE_RUNTIME_PROFILE",
+    "CAUSAL_RUNTIME_PROFILE",
     "EVOLUTION_DEMO_RUNTIME_PROFILE",
     "LIVE_BEHAVIOR_CONFIG",
 )
@@ -61,14 +63,13 @@ class RuntimeObservationTotals:
     unfunded_birth_rejections: int = 0
     capacity_birth_rejections: int = 0
     id_birth_rejections: int = 0
+    birth_release_energy_q: int = 0
     mutated_births: int = 0
     mutation_events: int = 0
     parameter_mutation_events: int = 0
     topology_mutation_events: int = 0
-    behavior_seeking_intervals: int = 0
-    behavior_searching_intervals: int = 0
-    behavior_cruising_intervals: int = 0
-    behavior_idle_intervals: int = 0
+    behavior_food_gradient_intervals: int = 0
+    behavior_locomoting_intervals: int = 0
     feeding_requested_q: int = 0
     feeding_actual_debit_q: int = 0
     feeding_reserve_credit_q: int = 0
@@ -84,14 +85,13 @@ class RuntimeObservationTotals:
             "unfunded_birth_rejections",
             "capacity_birth_rejections",
             "id_birth_rejections",
+            "birth_release_energy_q",
             "mutated_births",
             "mutation_events",
             "parameter_mutation_events",
             "topology_mutation_events",
-            "behavior_seeking_intervals",
-            "behavior_searching_intervals",
-            "behavior_cruising_intervals",
-            "behavior_idle_intervals",
+            "behavior_food_gradient_intervals",
+            "behavior_locomoting_intervals",
             "feeding_requested_q",
             "feeding_actual_debit_q",
             "feeding_reserve_credit_q",
@@ -224,7 +224,7 @@ class RuntimeUnityBackend:
         world,
         *,
         compile_domains: bool = True,
-        profile: RuntimeUnityProfile = BASELINE_RUNTIME_PROFILE,
+        profile: RuntimeUnityProfile = CAUSAL_RUNTIME_PROFILE,
     ) -> RuntimeUnityBackend:
         state = living_state_from_reference(world)
         config = living_runtime_config_from_reference(
@@ -549,9 +549,23 @@ def runtime_diagnostics(
         },
         "observed_session": totals,
         "configuration": {
-            "min_lifespan_s": config.mortality.min_lifespan_s,
-            "max_lifespan_s": config.mortality.max_lifespan_s,
+            "age_mortality_enabled": config.mortality.enabled,
+            "min_lifespan_s": (
+                config.mortality.min_lifespan_s
+                if config.mortality.enabled
+                else None
+            ),
+            "max_lifespan_s": (
+                config.mortality.max_lifespan_s
+                if config.mortality.enabled
+                else None
+            ),
             "mutation_rate_per_locus": config.mutation.mutation_rate_per_locus,
+            "food_state": "local_producer_value_and_horizontal_gradient",
+            "birth_release_impulse_ns": config.birth_release_impulse_ns,
+            "birth_separation_clearance_m": (
+                config.birth_separation_clearance_m
+            ),
             "max_mutations_per_birth": config.mutation.max_mutations_per_birth,
             "parameter_event_weight": config.mutation.parameter_event_weight,
             "topology_event_weight": config.mutation.topology_event_weight,
