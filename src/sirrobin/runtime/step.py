@@ -405,6 +405,9 @@ def advance_living_interval_with_kernels(
                 motion.ledger.response.yaw_inertia_after_kg_m2
             ),
         ),
+        # Release feasibility belongs to this candidate transaction. A failed
+        # proposal blocks the birth but does not invalidate otherwise valid
+        # field, feeding, metabolism, or motion state for the interval.
         birth_requested=(
             birth_requested & ~candidate_truncated & ~release_proposal.invalid
         ),
@@ -495,7 +498,6 @@ def advance_living_interval_with_kernels(
         | motion.ledger.response.yaw_backstop_hit.any(dim=1)
         | metabolism_ledger.invalid_death_kinetics.any(dim=1)
         | (birth_requested & candidate_truncated).any(dim=1)
-        | (birth_requested & release_proposal.invalid).any(dim=1)
         | motion_funding_unresolved
     )
     energy = _runtime_energy_ledger(

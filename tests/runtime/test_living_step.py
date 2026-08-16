@@ -363,6 +363,38 @@ def test_complete_interval_closes_matter_and_commits_a_mutated_paid_birth() -> N
     validate_living_state(step.state, config.economy)
 
 
+def test_impossible_birth_release_blocks_only_the_birth() -> None:
+    state, inputs, config = _fixture()
+    config = replace(
+        config,
+        birth_separation_clearance_m=min(
+            config.geometry.lx_m,
+            config.geometry.ly_m,
+        ),
+    )
+
+    session = RuntimeSession(
+        state,
+        config,
+        compile_motion=False,
+        compile_domains=False,
+        optimistic_motion=False,
+        optimistic_feeding=False,
+        optimistic_candidates=False,
+    )
+
+    chunk = session.advance_chunk(inputs, intervals=1)
+
+    lifecycle = chunk.last_interval.organisms.lifecycle.ledger
+    assert lifecycle.accepted_births.tolist() == [0]
+    assert not bool(lifecycle.born.any())
+    assert chunk.state.population.alive.sum().item() == 1
+    assert chunk.state.economy.step.item() == state.economy.step.item() + 1
+    assert chunk.last_interval.matter.books_closed.tolist() == [True]
+    assert chunk.invalid.tolist() == [False]
+    validate_living_state(chunk.state, config.economy)
+
+
 def test_morphology_birth_is_developed_and_paid_before_commit() -> None:
     state, inputs, config = _fixture()
     config = replace(
