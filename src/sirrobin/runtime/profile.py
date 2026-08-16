@@ -35,6 +35,15 @@ BASELINE_RUNTIME_PROFILE = RuntimeProfile(
     mortality=MortalityConfig(60.0, 100.0, seed=20260810),
     mutation=MutationConfig(seed=20260810),
 )
+CAUSAL_RUNTIME_PROFILE = RuntimeProfile(
+    name="causal",
+    description=(
+        "physical simulation time with starvation and explicit deaths only; "
+        "age mortality is disabled until a causal senescence model exists"
+    ),
+    mortality=MortalityConfig(60.0, 100.0, seed=20260810, enabled=False),
+    mutation=MutationConfig(seed=20260810),
+)
 EVOLUTION_DEMO_RUNTIME_PROFILE = RuntimeProfile(
     name="evolution-demo",
     description="fivefold observation window and mutation exposure for the Unity demo",
@@ -43,23 +52,15 @@ EVOLUTION_DEMO_RUNTIME_PROFILE = RuntimeProfile(
 )
 RUNTIME_PROFILES = {
     profile.name: profile
-    for profile in (BASELINE_RUNTIME_PROFILE, EVOLUTION_DEMO_RUNTIME_PROFILE)
+    for profile in (
+        CAUSAL_RUNTIME_PROFILE,
+        BASELINE_RUNTIME_PROFILE,
+        EVOLUTION_DEMO_RUNTIME_PROFILE,
+    )
 }
 
 LIVE_BEHAVIOR_CONFIG = BehaviorConfig(
-    food_seeking_effort_fraction=0.5,
-    search_effort_fraction=0.25,
-    # A 137.5-degree exploratory heading change needs materially more than the
-    # old eight-second leg to settle through the physical yaw controller. A
-    # thirty-second leg retains deterministic local search while leaving a
-    # sustained straight run after each turn.
-    search_leg_duration_s=30.0,
-    search_duty_fraction=0.65,
-    # One structural-equivalent reserve is a morphology-scaled internal target.
-    # Local producer must also be present; no world-wide field statistic enters
-    # the behavior decision.
-    food_sufficient_reserve_ratio=1.0,
-    food_cruise_effort_fraction=0.1,
+    locomotor_effort_fraction=0.5,
 )
 
 
@@ -67,7 +68,7 @@ def living_runtime_config_from_reference(
     world: HeadlessWorld,
     state: LivingState,
     *,
-    profile: RuntimeProfile = BASELINE_RUNTIME_PROFILE,
+    profile: RuntimeProfile = CAUSAL_RUNTIME_PROFILE,
 ) -> LivingRuntimeConfig:
     """Build the shared operational runtime configuration at the bootstrap seam."""
 

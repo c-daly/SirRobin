@@ -43,6 +43,7 @@ def _fixture() -> tuple[PopulationState, OrganismIntervalInputs]:
         birth_requested=torch.tensor([[False, True, False]]),
         child_structure_q=torch.tensor([[5, 5, 0]], dtype=torch.int64),
         child_reserve_q=torch.tensor([[2, 2, 0]], dtype=torch.int64),
+        birth_release_energy_q=torch.zeros((1, 3), dtype=torch.int64),
         time_s=torch.tensor([5.0], dtype=torch.float64),
     )
     return state, inputs

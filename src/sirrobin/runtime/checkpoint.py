@@ -33,9 +33,9 @@ from sirrobin.runtime.config import (
 )
 from sirrobin.runtime.state import LivingState, validate_living_state
 
-RUNTIME_CHECKPOINT_SCHEMA = "sirrobin.runtime.checkpoint.v1"
+RUNTIME_CHECKPOINT_SCHEMA = "sirrobin.runtime.checkpoint.v2"
 RUNTIME_CHECKPOINT_LAYOUT_SHA256 = (
-    "e080f0c3feb51da73ff5a70de7a8a44362da17dfcf50c8280232d0fe68c584f4"
+    "b8a490dfc3e09b33bd43f235b65a9e6cc949a9d1328941039c8c3f7bc7dc3a87"
 )
 
 _CONFIG_COMPONENTS = {
@@ -49,7 +49,14 @@ _CONFIG_COMPONENTS = {
     "mutation": MutationConfig,
     "development": DevelopmentConfig,
 }
-_CONFIG_FIELDS = frozenset((*_CONFIG_COMPONENTS, "child_initial_reserve_q"))
+_CONFIG_FIELDS = frozenset(
+    (
+        *_CONFIG_COMPONENTS,
+        "child_initial_reserve_q",
+        "birth_release_impulse_ns",
+        "birth_separation_clearance_m",
+    )
+)
 
 
 def _canonical_json(value: object) -> str:
@@ -61,6 +68,10 @@ def _config_payload(config: LivingRuntimeConfig) -> dict[str, object]:
         name: asdict(getattr(config, name)) for name in _CONFIG_COMPONENTS
     }
     payload["child_initial_reserve_q"] = config.child_initial_reserve_q
+    payload["birth_release_impulse_ns"] = config.birth_release_impulse_ns
+    payload["birth_separation_clearance_m"] = (
+        config.birth_separation_clearance_m
+    )
     return payload
 
 
@@ -95,6 +106,10 @@ def _load_config(payload: object) -> LivingRuntimeConfig:
             )
         restored[name] = config_type(**component)
     restored["child_initial_reserve_q"] = payload["child_initial_reserve_q"]
+    restored["birth_release_impulse_ns"] = payload["birth_release_impulse_ns"]
+    restored["birth_separation_clearance_m"] = payload[
+        "birth_separation_clearance_m"
+    ]
     config = LivingRuntimeConfig(**restored)
     validate_living_runtime_config(config)
     return config

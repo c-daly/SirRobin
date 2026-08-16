@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure autonomous foraging modes and physical paths without scoring them."""
+"""Measure local food state, autonomous effort, and physical paths."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import math
 
 import torch
 
-from tools.runtime_unity import BASELINE_RUNTIME_PROFILE, RuntimeUnityBackend
+from tools.runtime_unity import CAUSAL_RUNTIME_PROFILE, RuntimeUnityBackend
 from tools.serve_unity import (
     ECONOMY_INTERVAL_S,
     INITIAL_BODIES,
@@ -21,7 +21,6 @@ INTERPRETATION = (
     "observed foraging requests and physical outcomes; direct paths, circles, "
     "overshoot, and failure are not pass/fail"
 )
-MODE_NAMES = ("seeking", "searching", "cruising", "idle")
 
 
 def _whole_intervals(duration_s: float) -> int:
@@ -54,10 +53,8 @@ def _new_track(
         "signed_yaw_change_rad": 0.0,
         "absolute_yaw_change_rad": 0.0,
         "behavior_intervals": 0,
-        "seeking_intervals": 0,
-        "searching_intervals": 0,
-        "cruising_intervals": 0,
-        "idle_intervals": 0,
+        "food_gradient_intervals": 0,
+        "locomoting_intervals": 0,
         "requested_effort_sum": 0.0,
         "feeding_debit_q": 0,
         "sampled_producer_sum_mol_m3": 0.0,
@@ -105,7 +102,8 @@ def _observe_behavior(tracks: dict[int, dict[str, object]], before, chunk) -> No
         raise RuntimeError("autonomous diagnostic requires behavior output")
     alive = before.population.alive[0].detach().cpu()
     stable_id = before.population.stable_id[0].detach().cpu()
-    modes = {name: getattr(behavior, name)[0].detach().cpu() for name in MODE_NAMES}
+    gradient_present = behavior.horizontal_gradient_present[0].detach().cpu()
+    locomoting = behavior.locomoting[0].detach().cpu()
     effort = behavior.requested_effort_fraction[0].detach().cpu()
     producer = behavior.sampled_producer_mol_m3[0].detach().cpu()
     feeding = chunk.last_interval.feeding.ledger.actual_debit_q[0].detach().cpu()
@@ -113,10 +111,12 @@ def _observe_behavior(tracks: dict[int, dict[str, object]], before, chunk) -> No
         identity = int(stable_id[slot])
         track = tracks[identity]
         track["behavior_intervals"] = int(track["behavior_intervals"]) + 1
-        for mode, mask in modes.items():
-            if bool(mask[slot]):
-                key = f"{mode}_intervals"
-                track[key] = int(track[key]) + 1
+        if bool(gradient_present[slot]):
+            track["food_gradient_intervals"] = (
+                int(track["food_gradient_intervals"]) + 1
+            )
+        if bool(locomoting[slot]):
+            track["locomoting_intervals"] = int(track["locomoting_intervals"]) + 1
         track["requested_effort_sum"] = float(track["requested_effort_sum"]) + float(effort[slot])
         track["feeding_debit_q"] = int(track["feeding_debit_q"]) + int(feeding[slot])
         track["sampled_producer_sum_mol_m3"] = float(track["sampled_producer_sum_mol_m3"]) + float(
@@ -130,7 +130,8 @@ def _finalize_track(track: dict[str, object], final_by_id: dict[int, dict[str, i
     displacement_m = float(torch.linalg.vector_norm(displacement))
     path_length_m = float(track["path_length_m"])
     track.pop("last_yaw_rad")
-    mode_intervals = {name: int(track.pop(f"{name}_intervals")) for name in MODE_NAMES}
+    food_gradient_intervals = int(track.pop("food_gradient_intervals"))
+    locomoting_intervals = int(track.pop("locomoting_intervals"))
     requested_effort_sum = float(track.pop("requested_effort_sum"))
     sampled_producer_sum = float(track.pop("sampled_producer_sum_mol_m3"))
     final = final_by_id.get(int(track["id"]))
@@ -140,10 +141,14 @@ def _finalize_track(track: dict[str, object], final_by_id: dict[int, dict[str, i
         "final_reserve_q": None if final is None else final["reserve_q"],
         "generation": None if final is None else final["generation"],
         "behavior_intervals": intervals,
-        "mode_intervals": mode_intervals,
-        "mode_fractions": {
-            name: (count / intervals if intervals else 0.0) for name, count in mode_intervals.items()
-        },
+        "food_gradient_intervals": food_gradient_intervals,
+        "food_gradient_fraction": (
+            food_gradient_intervals / intervals if intervals else 0.0
+        ),
+        "locomoting_intervals": locomoting_intervals,
+        "locomoting_fraction": (
+            locomoting_intervals / intervals if intervals else 0.0
+        ),
         "mean_requested_effort": (requested_effort_sum / intervals if intervals else 0.0),
         "mean_sampled_producer_mol_m3": (sampled_producer_sum / intervals if intervals else 0.0),
         "displacement_m": displacement_m,
@@ -158,7 +163,7 @@ def run_foraging_diagnostic(
     seed: int = 20260809,
     compile_domains: bool | None = None,
 ) -> dict[str, object]:
-    """Observe per-identity intent modes, feeding, and resulting trajectories."""
+    """Observe per-identity food state, intent, feeding, and trajectories."""
 
     intervals = _whole_intervals(duration_s)
     if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**63:
@@ -174,8 +179,13 @@ def run_foraging_diagnostic(
     backend = RuntimeUnityBackend.from_reference_fixture(
         world,
         compile_domains=compile_runtime,
-        profile=BASELINE_RUNTIME_PROFILE,
+        profile=CAUSAL_RUNTIME_PROFILE,
     )
+    initial_producer = backend.session.state.economy.bp_q.detach().cpu().clone()
+    producer_grazing_by_cell = torch.zeros_like(initial_producer)
+    producer_production_q = 0
+    producer_maintenance_q = 0
+    producer_mortality_q = 0
     tracks: dict[int, dict[str, object]] = {}
     _observe_motion(
         tracks,
@@ -192,6 +202,21 @@ def run_foraging_diagnostic(
                 intervals=1,
             )
             _observe_behavior(tracks, before, chunk)
+            economy_ledger = chunk.last_interval.economy.ledger
+            producer_production_q += int(
+                economy_ledger.production_q.sum().detach().cpu()
+            )
+            producer_maintenance_q += int(
+                economy_ledger.producer_maintenance_q.sum().detach().cpu()
+            )
+            producer_mortality_q += int(
+                economy_ledger.producer_mortality_q.sum().detach().cpu()
+            )
+            producer_grazing_by_cell += (
+                chunk.last_interval.feeding.ledger.producer_debit_by_cell_q
+                .detach()
+                .cpu()
+            )
             _observe_motion(
                 tracks,
                 chunk.state,
@@ -215,12 +240,28 @@ def run_foraging_diagnostic(
         for slot in final_alive.nonzero().flatten().tolist()
     }
     creatures = [_finalize_track(track, final_by_id) for _, track in sorted(tracks.items())]
-    mode_totals = {
-        name: sum(int(creature["mode_intervals"][name]) for creature in creatures) for name in MODE_NAMES
-    }
+    food_gradient_intervals = sum(
+        int(creature["food_gradient_intervals"]) for creature in creatures
+    )
+    locomoting_intervals = sum(
+        int(creature["locomoting_intervals"]) for creature in creatures
+    )
     behavior_intervals = sum(int(creature["behavior_intervals"]) for creature in creatures)
+    final_producer = backend.session.state.economy.bp_q.detach().cpu()
+    initial_producer_q = int(initial_producer.sum())
+    final_producer_q = int(final_producer.sum())
+    feeding_debit_q = int(producer_grazing_by_cell.sum())
+    producer_balance_expected_q = (
+        initial_producer_q
+        + producer_production_q
+        - producer_maintenance_q
+        - producer_mortality_q
+        - feeding_debit_q
+    )
+    grazed_cells = producer_grazing_by_cell > 0
+    initial_stock_in_grazed_cells_q = int(initial_producer[grazed_cells].sum())
     return {
-        "schema": "sirrobin.foraging-diagnostic.v1",
+        "schema": "sirrobin.foraging-diagnostic.v3",
         "interpretation": INTERPRETATION,
         "configuration": {
             "device": str(device),
@@ -232,11 +273,31 @@ def run_foraging_diagnostic(
             "initial_bodies": INITIAL_BODIES,
         },
         "conservation": {"books_closed": books_closed},
+        "producer_accounting": {
+            "initial_q": initial_producer_q,
+            "final_q": final_producer_q,
+            "reaction_production_q": producer_production_q,
+            "maintenance_q": producer_maintenance_q,
+            "mortality_q": producer_mortality_q,
+            "feeding_debit_q": feeding_debit_q,
+            "expected_final_q": producer_balance_expected_q,
+            "balance_closed": final_producer_q == producer_balance_expected_q,
+            "initial_occupied_cells": int((initial_producer > 0).sum()),
+            "grazed_cells": int(grazed_cells.sum()),
+            "initial_stock_in_grazed_cells_q": initial_stock_in_grazed_cells_q,
+            "max_cell_feeding_debit_q": int(producer_grazing_by_cell.max()),
+            "feeding_fraction_of_initial_grazed_stock": (
+                feeding_debit_q / initial_stock_in_grazed_cells_q
+                if initial_stock_in_grazed_cells_q > 0
+                else None
+            ),
+        },
         "aggregate": {
             "observed_identities": len(creatures),
             "behavior_intervals": behavior_intervals,
-            "mode_intervals": mode_totals,
-            "feeding_debit_q": sum(int(creature["feeding_debit_q"]) for creature in creatures),
+            "food_gradient_intervals": food_gradient_intervals,
+            "locomoting_intervals": locomoting_intervals,
+            "feeding_debit_q": feeding_debit_q,
         },
         "creatures": creatures,
     }

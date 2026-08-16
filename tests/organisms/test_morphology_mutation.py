@@ -279,6 +279,7 @@ def test_candidate_is_developed_priced_and_only_then_committed() -> None:
             birth=state.population.alive,
             child_structure_q=child_structure_q,
             child_reserve_q=torch.full_like(child_structure_q, 100),
+            birth_release_energy_q=torch.zeros_like(child_structure_q),
             time_s=torch.tensor([1.0], dtype=torch.float64),
         ),
     )
@@ -335,6 +336,7 @@ def test_unaffordable_candidate_is_not_replaced_by_a_clone() -> None:
             birth=population.alive,
             child_structure_q=child_structure_q,
             child_reserve_q=torch.full_like(child_structure_q, 100),
+            birth_release_energy_q=torch.zeros_like(child_structure_q),
             time_s=torch.tensor([1.0], dtype=torch.float64),
         ),
     )

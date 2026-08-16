@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import replace
 
 import pytest
@@ -22,6 +21,7 @@ from sirrobin.runtime.reference_adapter import living_state_from_reference
 from tools.run_world import LIVING_MATERIAL_ENERGY_CONFIG, _build_fixture_world
 from tools.runtime_unity import (
     BASELINE_RUNTIME_PROFILE,
+    CAUSAL_RUNTIME_PROFILE,
     EVOLUTION_DEMO_RUNTIME_PROFILE,
     LIVE_BEHAVIOR_CONFIG,
     RuntimeUnityBackend,
@@ -34,11 +34,13 @@ from tools.serve_unity import (
     EXTINCTION_EVENT,
     INITIAL_BODIES,
     LIVE_INITIAL_RESERVE_Q,
-    LIVE_RICH_FOOD_CELL_Q,
+    LIVE_PRODUCER_N_MOL_M3,
+    LIVE_TOTAL_N_MOL_M3,
     _build_server_runner,
     _build_server_world,
     _descriptor,
     _events,
+    _pace_wall_clock,
     _payload,
     _record,
     _retry_terminal_record,
@@ -395,9 +397,49 @@ def test_descriptor_retains_the_existing_unity_protocol() -> None:
     assert descriptor["record_types"] == [
         {"key": "snapshot.render", "label": "Render snapshot", "priority": 0}
     ]
+    assert descriptor["configuration"]["clock"] == {
+        "authoritative_time": "simulation_seconds",
+        "simulation_seconds_per_wall_second": None,
+        "mode": "compute-limited",
+    }
 
 
-def test_live_world_is_spacious_without_diluting_the_local_field_cells() -> None:
+def test_time_scale_is_observation_pacing_not_a_simulation_rate() -> None:
+    descriptor = _descriptor(_build_server_world(), time_scale=60.0)
+
+    assert descriptor["configuration"]["clock"] == {
+        "authoritative_time": "simulation_seconds",
+        "simulation_seconds_per_wall_second": 60.0,
+        "mode": "paced-upper-bound",
+    }
+
+
+def test_wall_clock_pacing_waits_only_when_simulation_is_ahead(monkeypatch) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr("tools.serve_unity.time.perf_counter", lambda: 101.25)
+    monkeypatch.setattr("tools.serve_unity.time.sleep", sleeps.append)
+
+    _pace_wall_clock(
+        wall_started_s=100.0,
+        sim_started_s=20.0,
+        sim_now_s=140.0,
+        time_scale=60.0,
+    )
+
+    assert sleeps == [pytest.approx(0.75)]
+
+    sleeps.clear()
+    monkeypatch.setattr("tools.serve_unity.time.perf_counter", lambda: 103.0)
+    _pace_wall_clock(
+        wall_started_s=100.0,
+        sim_started_s=20.0,
+        sim_now_s=140.0,
+        time_scale=60.0,
+    )
+    assert sleeps == []
+
+
+def test_live_world_uses_metre_scale_finite_volumes() -> None:
     world = _build_server_world()
     descriptor = _descriptor(world)
 
@@ -405,30 +447,39 @@ def test_live_world_is_spacious_without_diluting_the_local_field_cells() -> None
     assert DISPLAY_BODIES == CAPACITY
     assert world.body.capacity == CAPACITY
     assert world.body.mass_sim.dtype == torch.float32
-    assert world.economy_config.shape == (1, 6, 6, 4)
+    assert world.economy_config.shape == (1, 60, 60, 20)
     assert world.geometry.lx_m == 60.0
     assert world.geometry.ly_m == 60.0
     assert world.geometry.lz_m == 20.0
-    assert world.geometry.cell_volume_m3 == 500.0
+    assert world.geometry.cell_volume_m3 == 1.0
     assert descriptor["configuration"]["world"] == {
         "width_m": 60.0,
         "height_m": 60.0,
         "depth_m": 20.0,
-        "grid_cols": 6,
-        "grid_rows": 6,
-        "grid_layers": 4,
+        "grid_cols": 60,
+        "grid_rows": 60,
+        "grid_layers": 20,
     }
 
 
-def test_live_world_has_exact_sparse_food_and_low_founder_reserves() -> None:
+def test_live_world_has_homogeneous_local_stocks_and_low_founder_reserves() -> None:
     world = _build_server_world()
     _seed_visible_baseline(world)
-    assert int(world.economy_state.bp_q.sum()) == 12 * LIVE_RICH_FOOD_CELL_Q
-    positive = world.economy_state.bp_q[world.economy_state.bp_q > 0]
-    assert positive.numel() == 12
-    assert torch.unique(positive).tolist() == [LIVE_RICH_FOOD_CELL_Q]
-    assert LIVE_RICH_FOOD_CELL_Q == 2_000_000
-    assert int((world.economy_state.bp_q == 0).sum()) == 132
+    total_n_cell_q = round(
+        LIVE_TOTAL_N_MOL_M3
+        * world.geometry.cell_volume_m3
+        / world.economy_config.q_mass_mol
+    )
+    assert int(world.economy_state.bp_q.sum()) == 288_000_000
+    assert (
+        int(world.economy_state.bp_q.sum())
+        * world.economy_config.q_mass_mol
+        / (world.geometry.lx_m * world.geometry.ly_m * world.geometry.lz_m)
+    ) == pytest.approx(LIVE_PRODUCER_N_MOL_M3)
+    assert torch.unique(world.economy_state.bp_q).tolist() == [4_000]
+    total_n = sum(world.economy_state.reservoirs)
+    assert torch.unique(total_n).tolist() == [total_n_cell_q]
+    assert total_n_cell_q == 22_250
     assert world.creature_material.reserve_q[world.body.alive].tolist() == [
         LIVE_INITIAL_RESERVE_Q
     ] * INITIAL_BODIES
@@ -440,14 +491,14 @@ def test_live_world_has_exact_sparse_food_and_low_founder_reserves() -> None:
 
     assert tick.food_seeking is None
     assert tick.matter.books_closed.tolist() == [True]
-    assert len(payload["producer_grid"]) == 6
-    assert all(len(row) == 6 for row in payload["producer_grid"])
+    assert len(payload["producer_grid"]) == 60
+    assert all(len(row) == 60 for row in payload["producer_grid"])
     assert len({value for row in payload["producer_grid"] for value in row}) > 1
     assert sum(sum(row) for row in payload["producer_grid"]) == int(
         world.economy_state.bp_q.sum()
     )
-    assert len(payload["dissolved_grid"]) == 6
-    assert all(len(row) == 6 for row in payload["dissolved_grid"])
+    assert len(payload["dissolved_grid"]) == 60
+    assert all(len(row) == 60 for row in payload["dissolved_grid"])
 
 
 def test_device_runtime_backend_advances_and_formats_existing_protocol() -> None:
@@ -490,18 +541,15 @@ def test_device_runtime_backend_advances_and_formats_existing_protocol() -> None
     assert not backend.session.optimistic_motion_enabled
     assert backend.config.motion.stages == 4
     assert backend.config.motion.phase_samples == 3
-    assert backend.config.behavior.search_effort_fraction > 0.0
-    assert backend.config.behavior.search_leg_duration_s > 0.0
-    assert backend.config.behavior.search_duty_fraction < 1.0
-    assert backend.config.behavior.food_sufficient_reserve_ratio > 0.0
+    assert backend.config.behavior.locomotor_effort_fraction > 0.0
     assert torch.equal(
         advanced.accepted_effort_fraction,
         backend.last_interval.motion.ledger.selected.effort_fraction.cpu(),
     )
 
 
-def test_live_flat_field_exploration_holds_a_physical_straight_run() -> None:
-    """An aligned explorer must not be assigned a new turn before it settles."""
+def test_live_flat_field_drive_never_assigns_a_heading() -> None:
+    """A flat food field must leave the resulting physical path uninterpreted."""
 
     economy = replace(
         EconomyConfig(),
@@ -536,18 +584,12 @@ def test_live_flat_field_exploration_holds_a_physical_straight_run() -> None:
         LIVE_BEHAVIOR_CONFIG,
         q_mass_mol=world.economy_config.q_mass_mol,
     )
-    initial_heading = initial.requested_heading_enu[0, 0]
-    state.motion.yaw_rad[0, 0] = torch.atan2(
-        initial_heading[1], initial_heading[0]
-    )
+    assert not bool(initial.requested_heading_enu.any())
+    state.motion.yaw_rad[0, 0] = 0.0
 
     previous_position = state.motion.position_enu_m[0, 0, :2].clone()
-    unwrapped_displacement = torch.zeros_like(previous_position)
     path_length_m = 0.0
-    absolute_yaw_change_rad = 0.0
-    previous_yaw = float(state.motion.yaw_rad[0, 0])
-    late_heading_errors: list[float] = []
-    for interval in range(200):
+    for _ in range(200):
         behavior = request_living_intent(
             state.population,
             state.body,
@@ -558,6 +600,8 @@ def test_live_flat_field_exploration_holds_a_physical_straight_run() -> None:
             LIVE_BEHAVIOR_CONFIG,
             q_mass_mol=world.economy_config.q_mass_mol,
         )
+        assert not bool(behavior.requested_heading_enu.any())
+        assert not bool(behavior.motion.heading_initialized.any())
         motion = advance_phase_window(
             state.body,
             behavior.motion,
@@ -573,41 +617,10 @@ def test_live_flat_field_exploration_holds_a_physical_straight_run() -> None:
         delta = (
             torch.remainder(position - previous_position + 30.0, 60.0) - 30.0
         )
-        unwrapped_displacement += delta
         path_length_m += float(torch.linalg.vector_norm(delta))
         previous_position = position.clone()
 
-        yaw = float(state.motion.yaw_rad[0, 0])
-        yaw_delta = math.atan2(
-            math.sin(yaw - previous_yaw), math.cos(yaw - previous_yaw)
-        )
-        absolute_yaw_change_rad += abs(yaw_delta)
-        previous_yaw = yaw
-
-        if interval >= 160:
-            velocity = state.motion.velocity_rel_water_enu_m_s[0, 0, :2]
-            travel = velocity / torch.linalg.vector_norm(velocity).clamp_min(
-                1.0e-9
-            )
-            desired = state.motion.desired_heading_enu[0, 0].to(travel.dtype)
-            late_heading_errors.append(
-                abs(
-                    float(
-                        torch.atan2(
-                            travel[0] * desired[1] - travel[1] * desired[0],
-                            torch.dot(travel, desired).clamp(-1.0, 1.0),
-                        )
-                    )
-                )
-            )
-
     assert path_length_m > 10.0
-    assert (
-        float(torch.linalg.vector_norm(unwrapped_displacement))
-        > 0.98 * path_length_m
-    )
-    assert absolute_yaw_change_rad < 0.5
-    assert sum(late_heading_errors) / len(late_heading_errors) < 0.15
 
 
 def test_evolution_demo_is_an_explicit_fivefold_observation_profile() -> None:
@@ -637,9 +650,29 @@ def test_evolution_demo_is_an_explicit_fivefold_observation_profile() -> None:
     assert descriptor["configuration"]["runtime_profile"] == {
         "name": "evolution-demo",
         "description": demo.description,
+        "age_mortality_enabled": True,
         "min_lifespan_s": 300.0,
         "max_lifespan_s": 500.0,
         "mutation_rate_per_locus": 0.01,
+        "food_state": "local_producer_value_and_horizontal_gradient",
+    }
+
+
+def test_causal_profile_does_not_invent_age_mortality() -> None:
+    profile = CAUSAL_RUNTIME_PROFILE
+
+    assert profile.name == "causal"
+    assert profile.mortality.enabled is False
+    descriptor = _descriptor(_build_server_world(), profile=profile)
+
+    assert descriptor["configuration"]["runtime_profile"] == {
+        "name": "causal",
+        "description": profile.description,
+        "age_mortality_enabled": False,
+        "min_lifespan_s": None,
+        "max_lifespan_s": None,
+        "mutation_rate_per_locus": profile.mutation.mutation_rate_per_locus,
+        "food_state": "local_producer_value_and_horizontal_gradient",
     }
 
 
@@ -671,6 +704,7 @@ def test_runtime_diagnostics_report_exact_reproduction_funding_outcomes() -> Non
     assert totals["unfunded_birth_rejections"] == INITIAL_BODIES
     assert totals["capacity_birth_rejections"] == 0
     assert totals["id_birth_rejections"] == 0
+    assert totals["birth_release_energy_q"] == 0
     assert totals["deaths"] == 0
     assert totals["starvation_deaths"] == 0
     assert totals["old_age_deaths"] == 0
@@ -678,21 +712,19 @@ def test_runtime_diagnostics_report_exact_reproduction_funding_outcomes() -> Non
         totals["parameter_mutation_events"]
         + totals["topology_mutation_events"]
     )
-    behavior_intervals = sum(
-        totals[name]
-        for name in (
-            "behavior_seeking_intervals",
-            "behavior_searching_intervals",
-            "behavior_cruising_intervals",
-            "behavior_idle_intervals",
-        )
-    )
-    assert behavior_intervals == INITIAL_BODIES
+    assert totals["behavior_locomoting_intervals"] == INITIAL_BODIES
+    assert 0 <= totals["behavior_food_gradient_intervals"] <= INITIAL_BODIES
     assert totals["feeding_requested_q"] >= totals["feeding_actual_debit_q"]
     assert payload["diagnostics"]["current"]["population"] == INITIAL_BODIES
     assert payload["diagnostics"]["current"]["generation"]["counts"] == [
         {"generation": 0, "population": INITIAL_BODIES}
     ]
+    assert payload["diagnostics"]["configuration"][
+        "birth_release_impulse_ns"
+    ] == pytest.approx(1.0)
+    assert payload["diagnostics"]["configuration"][
+        "birth_separation_clearance_m"
+    ] == pytest.approx(1.0e-4)
 
 
 def test_runtime_diagnostics_split_parameter_and_topology_mutations() -> None:

@@ -139,7 +139,7 @@ def test_interrupted_publication_preserves_the_previous_checkpoint(
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
-        ("schema", "sirrobin.runtime.checkpoint.v0", "schema"),
+        ("schema", "sirrobin.runtime.checkpoint.v1", "schema"),
         ("config.mutation.seed", 99, "config hash mismatch"),
     ],
 )

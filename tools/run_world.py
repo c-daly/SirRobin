@@ -31,7 +31,7 @@ from sirrobin.physics.contracts import FluidSample
 from sirrobin.physics.live_config import LiveLocomotionConfig
 from sirrobin.runtime.material import total_matter_q
 from sirrobin.runtime.profile import (
-    BASELINE_RUNTIME_PROFILE,
+    CAUSAL_RUNTIME_PROFILE,
     RUNTIME_PROFILES,
     living_runtime_config_from_reference,
 )
@@ -166,12 +166,11 @@ class RuntimeWorldRunReport:
     requested_births: int
     unfunded_birth_rejections: int
     capacity_birth_rejections: int
+    birth_release_energy_q: int
     mutated_births: int
     mutation_events: int
-    behavior_seeking_intervals: int
-    behavior_searching_intervals: int
-    behavior_cruising_intervals: int
-    behavior_idle_intervals: int
+    behavior_food_gradient_intervals: int
+    behavior_locomoting_intervals: int
     feeding_requested_q: int
     feeding_actual_debit_q: int
     feeding_reserve_credit_q: int
@@ -211,6 +210,7 @@ def _build_fixture_world(
     reserve_q_per_creature: int = FIXTURE_RESERVE_Q_PER_BODY,
     economy_config: EconomyConfig | None = None,
     physics_dtype: torch.dtype = torch.float64,
+    initial_dissolved_q_per_cell: int | None = None,
 ) -> HeadlessWorld:
     if live_bodies is None:
         live_bodies = bodies
@@ -248,9 +248,20 @@ def _build_fixture_world(
     ):
         raise ValueError("fixture economy config must use the requested interval")
     economy_state = EconomyState.zeros(economy_config, device=device)
-    economy_state.nd_q.fill_(10_000_000)
-    economy_state.bp_q.fill_(1_000_000)
-    economy_state.bd_q[..., 0] = 500_000
+    if initial_dissolved_q_per_cell is None:
+        economy_state.nd_q.fill_(10_000_000)
+        economy_state.bp_q.fill_(1_000_000)
+        economy_state.bd_q[..., 0] = 500_000
+    else:
+        if (
+            isinstance(initial_dissolved_q_per_cell, bool)
+            or not isinstance(initial_dissolved_q_per_cell, int)
+            or initial_dissolved_q_per_cell < 0
+        ):
+            raise ValueError(
+                "initial dissolved inventory per cell must be a nonnegative integer"
+            )
+        economy_state.nd_q.fill_(initial_dissolved_q_per_cell)
     lead = (1, bodies)
     alive = genotype.alive
     return HeadlessWorld(
@@ -289,7 +300,7 @@ def run_runtime_world(
     seconds: float,
     bodies: int,
     live_bodies: int | None = None,
-    profile_name: str = BASELINE_RUNTIME_PROFILE.name,
+    profile_name: str = CAUSAL_RUNTIME_PROFILE.name,
     chunk_intervals: int | None = None,
     optimistic_candidates: bool = True,
     device_name: str,
@@ -482,12 +493,15 @@ def run_runtime_world(
         requested_births=sum_int("requested_births"),
         unfunded_birth_rejections=sum_int("unfunded_birth_rejections"),
         capacity_birth_rejections=sum_int("capacity_birth_rejections"),
+        birth_release_energy_q=sum_int("birth_release_energy_q"),
         mutated_births=sum_int("mutated_births"),
         mutation_events=sum_int("mutation_events"),
-        behavior_seeking_intervals=sum_int("behavior_seeking_intervals"),
-        behavior_searching_intervals=sum_int("behavior_searching_intervals"),
-        behavior_cruising_intervals=sum_int("behavior_cruising_intervals"),
-        behavior_idle_intervals=sum_int("behavior_idle_intervals"),
+        behavior_food_gradient_intervals=sum_int(
+            "behavior_food_gradient_intervals"
+        ),
+        behavior_locomoting_intervals=sum_int(
+            "behavior_locomoting_intervals"
+        ),
         feeding_requested_q=sum_int("feeding_requested_q"),
         feeding_actual_debit_q=sum_int("feeding_actual_debit_q"),
         feeding_reserve_credit_q=sum_int("feeding_reserve_credit_q"),
@@ -788,13 +802,12 @@ def format_runtime_report(report: RuntimeWorldRunReport) -> str:
             f"requested births: {report.requested_births}",
             f"unfunded birth rejections: {report.unfunded_birth_rejections}",
             f"capacity birth rejections: {report.capacity_birth_rejections}",
+            f"birth release energy q: {report.birth_release_energy_q}",
             f"mutated births: {report.mutated_births}",
             f"mutation events: {report.mutation_events}",
             "behavior intervals: "
-            f"seeking={report.behavior_seeking_intervals} "
-            f"searching={report.behavior_searching_intervals} "
-            f"cruising={report.behavior_cruising_intervals} "
-            f"idle={report.behavior_idle_intervals}",
+            f"food-gradient={report.behavior_food_gradient_intervals} "
+            f"locomoting={report.behavior_locomoting_intervals}",
             f"feeding requested q: {report.feeding_requested_q}",
             f"feeding actual debit q: {report.feeding_actual_debit_q}",
             f"feeding reserve credit q: {report.feeding_reserve_credit_q}",
@@ -994,7 +1007,7 @@ def main(argv: list[str] | None = None) -> int:
                 bodies=arguments.bodies,
                 live_bodies=arguments.live_bodies,
                 profile_name=(
-                    arguments.profile or BASELINE_RUNTIME_PROFILE.name
+                    arguments.profile or CAUSAL_RUNTIME_PROFILE.name
                 ),
                 chunk_intervals=arguments.chunk_intervals,
                 optimistic_candidates=not arguments.dense_candidates,

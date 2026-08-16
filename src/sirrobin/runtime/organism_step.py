@@ -27,6 +27,7 @@ class OrganismIntervalInputs:
     birth_requested: torch.Tensor
     child_structure_q: torch.Tensor
     child_reserve_q: torch.Tensor
+    birth_release_energy_q: torch.Tensor
     time_s: torch.Tensor
 
 
@@ -65,6 +66,7 @@ def advance_organism_interval(
             birth=inputs.birth_requested,
             child_structure_q=inputs.child_structure_q,
             child_reserve_q=inputs.child_reserve_q,
+            birth_release_energy_q=inputs.birth_release_energy_q,
             time_s=inputs.time_s,
         ),
     )

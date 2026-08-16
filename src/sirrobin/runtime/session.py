@@ -63,14 +63,13 @@ class LivingChunkSummary:
     unfunded_birth_rejections: torch.Tensor
     capacity_birth_rejections: torch.Tensor
     id_birth_rejections: torch.Tensor
+    birth_release_energy_q: torch.Tensor
     mutated_births: torch.Tensor
     mutation_events: torch.Tensor
     parameter_mutation_events: torch.Tensor
     topology_mutation_events: torch.Tensor
-    behavior_seeking_intervals: torch.Tensor
-    behavior_searching_intervals: torch.Tensor
-    behavior_cruising_intervals: torch.Tensor
-    behavior_idle_intervals: torch.Tensor
+    behavior_food_gradient_intervals: torch.Tensor
+    behavior_locomoting_intervals: torch.Tensor
     feeding_requested_q: torch.Tensor
     feeding_actual_debit_q: torch.Tensor
     feeding_reserve_credit_q: torch.Tensor
@@ -408,14 +407,13 @@ class RuntimeSession:
             unfunded_birth_rejections = zeros_i64.clone()
             capacity_birth_rejections = zeros_i64.clone()
             id_birth_rejections = zeros_i64.clone()
+            birth_release_energy_q = zeros_i64.clone()
             mutated_births = zeros_i64.clone()
             mutation_events = zeros_i64.clone()
             parameter_mutation_events = zeros_i64.clone()
             topology_mutation_events = zeros_i64.clone()
-            behavior_seeking_intervals = zeros_i64.clone()
-            behavior_searching_intervals = zeros_i64.clone()
-            behavior_cruising_intervals = zeros_i64.clone()
-            behavior_idle_intervals = zeros_i64.clone()
+            behavior_food_gradient_intervals = zeros_i64.clone()
+            behavior_locomoting_intervals = zeros_i64.clone()
             feeding_requested_q = zeros_i64.clone()
             feeding_actual_debit_q = zeros_i64.clone()
             feeding_reserve_credit_q = zeros_i64.clone()
@@ -437,19 +435,13 @@ class RuntimeSession:
                 invalid |= advance.ledger.invalid
                 if behavior is not None:
                     invalid |= behavior.invalid.any(dim=1)
-                    behavior_seeking_intervals += behavior.seeking.sum(
-                        dim=1,
-                        dtype=torch.int64,
+                    behavior_food_gradient_intervals += (
+                        behavior.horizontal_gradient_present.sum(
+                            dim=1,
+                            dtype=torch.int64,
+                        )
                     )
-                    behavior_searching_intervals += behavior.searching.sum(
-                        dim=1,
-                        dtype=torch.int64,
-                    )
-                    behavior_cruising_intervals += behavior.cruising.sum(
-                        dim=1,
-                        dtype=torch.int64,
-                    )
-                    behavior_idle_intervals += behavior.idle.sum(
+                    behavior_locomoting_intervals += behavior.locomoting.sum(
                         dim=1,
                         dtype=torch.int64,
                     )
@@ -481,6 +473,12 @@ class RuntimeSession:
                 unfunded_birth_rejections += lifecycle.unfunded_rejections
                 capacity_birth_rejections += lifecycle.capacity_rejections
                 id_birth_rejections += lifecycle.id_rejections
+                birth_release_energy_q += (
+                    lifecycle.birth_release_energy_return_q.sum(
+                        dim=1,
+                        dtype=torch.int64,
+                    )
+                )
                 mutated_births += mutation.mutated.sum(
                     dim=1,
                     dtype=torch.int64,
@@ -530,6 +528,7 @@ class RuntimeSession:
                     energy.death_kinetic_and_carry_dissipation_j,
                     energy.death_reserve_dissipation_j,
                     energy.birth_construction_heat_j,
+                    energy.birth_release_heat_j,
                 ):
                     dissipation_j += value.reshape(value.shape[0], -1).sum(
                         dim=1,
@@ -546,14 +545,13 @@ class RuntimeSession:
                 unfunded_birth_rejections,
                 capacity_birth_rejections,
                 id_birth_rejections,
+                birth_release_energy_q,
                 mutated_births,
                 mutation_events,
                 parameter_mutation_events,
                 topology_mutation_events,
-                behavior_seeking_intervals,
-                behavior_searching_intervals,
-                behavior_cruising_intervals,
-                behavior_idle_intervals,
+                behavior_food_gradient_intervals,
+                behavior_locomoting_intervals,
                 feeding_requested_q,
                 feeding_actual_debit_q,
                 feeding_reserve_credit_q,

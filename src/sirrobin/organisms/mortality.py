@@ -16,8 +16,11 @@ class MortalityConfig:
     min_lifespan_s: float
     max_lifespan_s: float
     seed: int = 0
+    enabled: bool = True
 
     def validate(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise TypeError("age-mortality enabled flag must be boolean")
         bounds = (self.min_lifespan_s, self.max_lifespan_s)
         if any(
             isinstance(value, bool) or not isinstance(value, (int, float))
@@ -63,5 +66,7 @@ def old_age_due(
 ) -> torch.Tensor:
     """Return live identities whose deterministic lifespan has elapsed."""
 
+    if not config.enabled:
+        return torch.zeros_like(state.alive)
     age_s = time_s[:, None] - state.born_at_s
     return state.alive & (age_s >= lifespan_s(state, config))

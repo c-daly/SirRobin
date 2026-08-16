@@ -42,8 +42,11 @@ def test_replicated_lifecycle_diagnostic_is_deterministic_and_causal() -> None:
             final["reproduction"]["requested_births"] >= final["reproduction"]["births"]
         )
         assert final["mutation"]["events"] >= final["mutation"]["mutated_births"]
-        assert sum(final["behavior"].values()) == replicate["causal_inputs"][
-            "initial_population"
-        ]
+        assert final["behavior"]["locomoting_intervals"] == replicate[
+            "causal_inputs"
+        ]["initial_population"]
+        assert final["behavior"]["food_gradient_intervals"] <= replicate[
+            "causal_inputs"
+        ]["initial_population"]
         assert final["conservation"]["economy_books_closed"] is True
         assert final["conservation"]["matter_books_closed"] is True

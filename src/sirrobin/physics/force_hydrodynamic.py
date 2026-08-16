@@ -50,6 +50,26 @@ def _world_geometry(
     return rel_flu, rel_enu, rotation_enu, matrix, inertia, broadside
 
 
+def effective_mass_and_yaw_inertia(
+    body: DevelopedBody,
+    pose: LivePose,
+    yaw_rad: torch.Tensor,
+    config: LiveLocomotionConfig,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return developed-body effective mass and yaw inertia in world axes."""
+
+    _, _, _, matrix, inertia, _ = _world_geometry(
+        body,
+        pose,
+        yaw_rad.reshape(-1),
+        config,
+    )
+    return (
+        matrix.reshape(*body.alive.shape, 3, 3),
+        inertia.reshape(body.alive.shape),
+    )
+
+
 def hydrodynamic_contribution(
     body: DevelopedBody,
     state: LiveState,

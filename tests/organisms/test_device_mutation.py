@@ -50,6 +50,7 @@ def _paid_birth():
             birth=torch.tensor([[True, False, False]]),
             child_structure_q=state.structure_q,
             child_reserve_q=torch.tensor([[100, 0, 0]], dtype=torch.int64),
+            birth_release_energy_q=torch.zeros_like(state.structure_q),
             time_s=torch.tensor([1.0], dtype=torch.float64),
         ),
     )

@@ -18,6 +18,7 @@ class LifecycleRequest:
     birth: torch.Tensor
     child_structure_q: torch.Tensor
     child_reserve_q: torch.Tensor
+    birth_release_energy_q: torch.Tensor
     time_s: torch.Tensor
 
 
@@ -33,6 +34,7 @@ class LifecycleLedger:
     death_reserve_return_q: torch.Tensor
     birth_structure_transfer_q: torch.Tensor
     birth_reserve_transfer_q: torch.Tensor
+    birth_release_energy_return_q: torch.Tensor
     requested_births: torch.Tensor
     accepted_births: torch.Tensor
     unfunded_rejections: torch.Tensor
@@ -60,7 +62,11 @@ def validate_lifecycle_request(
             raise TypeError(f"{name} must be bool with shape {shape}")
         if value.device != device:
             raise ValueError(f"{name} must be on {device}")
-    for name in ("child_structure_q", "child_reserve_q"):
+    for name in (
+        "child_structure_q",
+        "child_reserve_q",
+        "birth_release_energy_q",
+    ):
         value = getattr(request, name)
         if value.dtype != torch.int64 or tuple(value.shape) != shape:
             raise TypeError(f"{name} must be int64 with shape {shape}")
@@ -75,6 +81,14 @@ def validate_lifecycle_request(
         ).any()
     ):
         raise ValueError("combined child material cost exceeds the safe domain")
+    material_cost_q = request.child_structure_q + request.child_reserve_q
+    if bool(
+        (
+            material_cost_q
+            > (INT64_SAFE_MAX - 1) - request.birth_release_energy_q
+        ).any()
+    ):
+        raise ValueError("combined birth cost exceeds the safe domain")
     worlds = shape[0]
     if request.time_s.dtype != torch.float64 or tuple(request.time_s.shape) != (
         worlds,
@@ -126,7 +140,11 @@ def settle_lifecycle(
         surviving, state.maintenance_carry_j, zeros_f64
     )
 
-    child_cost_q = request.child_structure_q + request.child_reserve_q
+    child_cost_q = (
+        request.child_structure_q
+        + request.child_reserve_q
+        + request.birth_release_energy_q
+    )
     requested = surviving & request.birth
     funded_candidate = requested & (reserve_surviving >= child_cost_q)
     free = ~surviving
@@ -171,7 +189,14 @@ def settle_lifecycle(
     birth_reserve_by_parent = torch.where(
         accepted_parent, request.child_reserve_q, zeros_i64
     )
-    parent_debit_q = birth_structure_by_parent + birth_reserve_by_parent
+    birth_release_by_parent = torch.where(
+        accepted_parent, request.birth_release_energy_q, zeros_i64
+    )
+    parent_debit_q = (
+        birth_structure_by_parent
+        + birth_reserve_by_parent
+        + birth_release_by_parent
+    )
     reserve_after_payment = reserve_surviving - parent_debit_q
 
     safe_parent_slot = parent_slot_for_child.clamp_min(0)
@@ -210,6 +235,7 @@ def settle_lifecycle(
         death_reserve_return_q=torch.where(died, state.reserve_q, zeros_i64),
         birth_structure_transfer_q=birth_structure_by_parent,
         birth_reserve_transfer_q=birth_reserve_by_parent,
+        birth_release_energy_return_q=birth_release_by_parent,
         requested_births=requested.sum(dim=1, dtype=torch.int64),
         accepted_births=accepted_count,
         unfunded_rejections=(requested & ~funded_candidate).sum(

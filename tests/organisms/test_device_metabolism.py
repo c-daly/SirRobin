@@ -131,6 +131,7 @@ def test_starvation_then_lifecycle_return_preserves_exact_matter() -> None:
             birth=torch.zeros_like(state.alive),
             child_structure_q=torch.zeros_like(state.structure_q),
             child_reserve_q=torch.zeros_like(state.reserve_q),
+            birth_release_energy_q=torch.zeros_like(state.reserve_q),
             time_s=torch.tensor([1.0], dtype=torch.float64),
         ),
     )

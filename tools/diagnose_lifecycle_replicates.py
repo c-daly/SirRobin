@@ -23,7 +23,7 @@ from tools.serve_unity import (
     ECONOMY_INTERVAL_S,
     INITIAL_BODIES,
     LIVE_INITIAL_RESERVE_Q,
-    LIVE_RICH_FOOD_CELL_Q,
+    LIVE_PRODUCER_N_MOL_M3,
     _build_server_world,
     _seed_visible_baseline,
 )
@@ -92,6 +92,7 @@ def _sample(backend: RuntimeUnityBackend) -> dict[str, object]:
             "unfunded_birth_rejections": observed["unfunded_birth_rejections"],
             "capacity_birth_rejections": observed["capacity_birth_rejections"],
             "id_birth_rejections": observed["id_birth_rejections"],
+            "release_energy_q": observed["birth_release_energy_q"],
         },
         "mortality": {
             "deaths": observed["deaths"],
@@ -105,10 +106,10 @@ def _sample(backend: RuntimeUnityBackend) -> dict[str, object]:
             "topology_events": observed["topology_mutation_events"],
         },
         "behavior": {
-            "seeking_intervals": observed["behavior_seeking_intervals"],
-            "searching_intervals": observed["behavior_searching_intervals"],
-            "cruising_intervals": observed["behavior_cruising_intervals"],
-            "idle_intervals": observed["behavior_idle_intervals"],
+            "food_gradient_intervals": observed[
+                "behavior_food_gradient_intervals"
+            ],
+            "locomoting_intervals": observed["behavior_locomoting_intervals"],
         },
         "conservation": {
             "economy_books_closed": (
@@ -198,7 +199,7 @@ def run_replicated_lifecycle_diagnostic(
                         "mutation_seed": profile.mutation.seed,
                         "initial_population": samples[0]["population"],
                         "initial_reserve_q_per_creature": LIVE_INITIAL_RESERVE_Q,
-                        "rich_food_cell_q": LIVE_RICH_FOOD_CELL_Q,
+                        "initial_producer_n_mol_m3": LIVE_PRODUCER_N_MOL_M3,
                     },
                     "terminal_reason": terminal_reason,
                     "samples": samples,
