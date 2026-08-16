@@ -4,10 +4,10 @@
 
 **Branch:** `recovery/living-loop`
 
-**Checked-out HEAD:** `59161e6ce763f340f129332a86b4a39605624e7b`
+**Implementation commit proved:** `b104a30` on current `origin/main` at `5492096`
 
-**State proved:** the preserved uncommitted living-loop implementation based on
-that commit
+**State proved:** the committed living-loop implementation after integration with
+the accepted headless lifecycle controls and runtime checkpoint work
 
 **Result:** the bounded causal-mechanism acceptance run passed on CUDA; ecological
 and biochemical calibration did not
@@ -101,7 +101,7 @@ complete active interval:
 - exact local producer debit: first at step `1`, `8 q` total;
 - depletion causality: restoring only the preceding exact cell debit changed
   creature 1's next requested heading;
-- paid movement: `83,794.39319229126 J` positive actuator work across the run;
+- paid movement: `83,794.39307022095 J` positive actuator work across the run;
 - negative control: the same developed bodies with joint amplitudes zero had
   zero positive actuator work and zero displacement;
 - mutated birth: parent ID `3`, child ID `13`, generation `1`, step `50`;
@@ -118,8 +118,8 @@ complete active interval:
   boundaries: closed on every interval;
 - every interval: finite and valid.
 
-Warmup took `97.7 wall-s`; the measured 51-interval proof body took
-`81.1 wall-s`. Throughput is not an acceptance success and remains a performance
+Warmup took `87.7 wall-s`; the measured 51-interval proof body took
+`90.4 wall-s`. Throughput is not an acceptance success and remains a performance
 limitation.
 
 ## Fresh Unity Play Mode replay
@@ -165,11 +165,21 @@ Focused post-fix verification:
 - the final compiled CUDA proof passed;
 - the fresh Unity Play Mode replay passed.
 
-The complete Python suite, run with CUDA hidden so it could not contend with the
-live CUDA viewer, passed `425` tests with `8` expected CUDA-only skips and `14`
-PyTorch deprecation warnings in `564.58 s`. The skipped production path was
-exercised separately by the passing compiled-CUDA proof and CUDA Unity replay.
-The working tree was deliberately not committed or cleaned.
+After rebasing onto current `main`, the complete Python suite ran with CUDA hidden
+and passed `434` tests with `9` expected CUDA-only skips and `14` PyTorch
+deprecation warnings in `488.20 s`. The exact rebased commit then passed the
+compiled-CUDA proof above. The checkpoint integration's five CPU tests and direct
+CUDA restore test also passed under the explicit
+`sirrobin.runtime.checkpoint.v2` schema; v2 records the causal behavior and
+mortality configuration plus birth-release impulse and clearance parameters. The
+post-proof worktree was clean.
+
+The Unity replay described above preceded the final rebase. The rebase added the
+already accepted headless lifecycle controls and checkpoint API, changed no Unity
+protocol or viewer file, and the final headless CUDA proof exercised the integrated
+runtime/session path. This report therefore treats the earlier fresh Play Mode run
+as viewer evidence and the post-rebase CUDA run as authority for the exact
+published simulation commit; it does not claim a second post-rebase editor replay.
 
 The result does not resolve the pre-existing mismatch among the `187.45 kg`
 developed founder, its `1,000 q` tracked structure, the dual-use reserve/material
